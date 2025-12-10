@@ -35,6 +35,10 @@ import mammoth from 'mammoth';
 import { saveAs } from 'file-saver';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 const ToolbarButton = ({ icon: Icon, active, onClick, label, isMobile }) => (
   <button
@@ -100,8 +104,20 @@ const SidebarItem = ({ type, author, text, date, active }) => {
 };
 
 const SignatureStamp = ({ stamp, isActive, onActivate, onDelete, onChange, boundsRef }) => {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    const rect = ref.current.getBoundingClientRect();
+    const height = rect.height;
+    if (height && height !== stamp.height) {
+      onChange(stamp.id, { height });
+    }
+  }, [stamp.height, stamp.id, onChange]);
+
   const handlePointerDown = (e) => {
     e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
     onActivate(stamp.id);
     const startX = e.clientX;
     const startY = e.clientY;
@@ -116,8 +132,9 @@ const SignatureStamp = ({ stamp, isActive, onActivate, onDelete, onChange, bound
       const nextLeft = Math.max(0, startLeft + deltaX);
       const nextTop = Math.max(0, startTop + deltaY);
 
-      const clampedLeft = bounds ? Math.min(nextLeft, bounds.width - stamp.width) : nextLeft;
-      const clampedTop = bounds ? Math.min(nextTop, bounds.height - stamp.height) : nextTop;
+      const stampHeight = stamp.height || ref.current?.getBoundingClientRect()?.height || 140;
+      const clampedLeft = bounds ? Math.min(nextLeft, Math.max(0, bounds.width - stamp.width)) : nextLeft;
+      const clampedTop = bounds ? Math.min(nextTop, Math.max(0, bounds.height - stampHeight)) : nextTop;
 
       onChange(stamp.id, { left: clampedLeft, top: clampedTop });
     };
@@ -156,6 +173,7 @@ const SignatureStamp = ({ stamp, isActive, onActivate, onDelete, onChange, bound
 
   return (
     <div
+      ref={ref}
       className={`absolute group border-2 rounded-xl transition-all ${isActive ? 'border-blue-500 shadow-lg' : 'border-transparent'}`}
       style={{
         left: `${stamp.left}px`,
@@ -369,17 +387,21 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
         nextContent = extractHtmlBody(value);
       } else if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
         const arrayBuffer = await file.arrayBuffer();
-        const pdfjsLib = await import('pdfjs-dist');
-        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.js', import.meta.url).toString();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
         const paragraphs = [];
+
         for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
           const page = await pdf.getPage(pageNumber);
           const textContent = await page.getTextContent();
-          const pageText = textContent.items.map((item) => item.str).join(' ').replace(/\s+/g, ' ').trim();
+          const pageText = textContent.items
+            .map((item) => item.str)
+            .join(' ')
+            .replace(/\s+/g, ' ')
+            .trim();
           if (pageText) paragraphs.push(`<p>${pageText}</p>`);
         }
-        nextContent = paragraphs.join('');
+
+        nextContent = paragraphs.join('') || '<p>Не удалось извлечь текст из PDF.</p>';
       } else {
         alert('Поддерживаются форматы: .docx, .html, .txt, .md, .pdf');
         event.target.value = '';
