@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bold,
   Italic,
@@ -8,7 +8,7 @@ import {
   Heading2,
   Plus,
   Image,
-  Table,
+  Table as TableIcon,
   MessageSquare,
   Share2,
   PenTool,
@@ -22,6 +22,15 @@ import {
   X,
   Maximize2,
 } from 'lucide-react';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import UnderlineExtension from '@tiptap/extension-underline';
+import ImageExtension from '@tiptap/extension-image';
+import { Table } from '@tiptap/extension-table';
+import { TableRow } from '@tiptap/extension-table-row';
+import { TableCell } from '@tiptap/extension-table-cell';
+import { TableHeader } from '@tiptap/extension-table-header';
+import DOMPurify from 'dompurify';
 import mammoth from 'mammoth';
 import { saveAs } from 'file-saver';
 import html2canvas from 'html2canvas';
@@ -207,9 +216,39 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
   const [signatureStamps, setSignatureStamps] = useState([]);
   const [activeStampId, setActiveStampId] = useState(null);
   const [isExporting, setIsExporting] = useState(false);
-  const editorRef = useRef(null);
   const pageRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  const sanitizedInitial = useMemo(
+    () => DOMPurify.sanitize(initialContent, { ADD_ATTR: ['style', 'class'] }),
+    [initialContent],
+  );
+
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({
+        heading: { levels: [1, 2, 3, 4] },
+        history: { depth: 800 },
+      }),
+      UnderlineExtension,
+      ImageExtension.configure({ allowBase64: true }),
+      Table.configure({ resizable: true }),
+      TableRow,
+      TableHeader,
+      TableCell,
+    ],
+    content: sanitizedInitial,
+    onUpdate: ({ editor: tiptapEditor }) => {
+      setContent(tiptapEditor.getHTML());
+    },
+    editorProps: {
+      attributes: {
+        class:
+          'tiptap w-full h-full outline-none font-serif text-slate-900 leading-7 selection:bg-blue-100 selection:text-blue-900',
+        style: 'font-family: "Merriweather", "Times New Roman", serif',
+      },
+    },
+  });
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -218,18 +257,22 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
     return () => window.removeEventListener('resize', checkMobile);
   }, []);
 
-  const format = (command, value = null) => {
-    document.execCommand(command, false, value);
-    editorRef.current?.focus();
-  };
+  useEffect(() => {
+    if (editor && sanitizedInitial) {
+      editor.commands.setContent(sanitizedInitial, false);
+    }
+  }, [editor, sanitizedInitial]);
 
   const insertHtml = (html) => {
-    document.execCommand('insertHTML', false, html);
-    editorRef.current?.focus();
+    if (!editor) return;
+    editor.commands.focus();
+    editor.commands.insertContent(html);
   };
 
   const handleInsert = (type) => {
     setShowInsertMenu(false);
+    if (!editor) return;
+
     if (type === 'Разрыв') {
       const pageBreakHtml =
         '<div class="page-break" style="margin: 40px 0; border-bottom: 2px dashed #cbd5e1; position: relative; text-align: center;">' +
@@ -239,17 +282,11 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
     } else if (type === 'Подпись') {
       onRequestSignature();
     } else if (type === 'Таблица') {
-      const tableHtml =
-        '<table style="width: 100%; border-collapse: collapse; margin: 16px 0;">' +
-        '<tr><th style="border: 1px solid #cbd5e1; padding: 8px; background:#f8fafc;">Столбец 1</th><th style="border: 1px solid #cbd5e1; padding: 8px; background:#f8fafc;">Столбец 2</th></tr>' +
-        '<tr><td style="border: 1px solid #cbd5e1; padding: 8px;">Значение</td><td style="border: 1px solid #cbd5e1; padding: 8px;">Значение</td></tr>' +
-        '</table>';
-      insertHtml(tableHtml);
+      editor.chain().focus().insertTable({ rows: 3, cols: 2, withHeaderRow: true }).run();
     } else if (type === 'Изображение') {
       const url = window.prompt('Введите URL изображения');
       if (url) {
-        const imageHtml = `<img src="${url}" alt="Вставленное изображение" style="max-width:100%; margin: 12px 0;" />`;
-        insertHtml(imageHtml);
+        editor.chain().focus().setImage({ src: url, alt: 'Вставленное изображение' }).run();
       }
     } else {
       alert(`В реальном приложении здесь откроется диалог вставки: ${type}`);
@@ -273,9 +310,9 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
     const newStamp = {
       id: crypto.randomUUID(),
       dataUrl: signatureData,
-      width: 240,
-      top: bounds ? Math.max(32, bounds.height / 2 - 40) : 200,
-      left: bounds ? Math.max(32, bounds.width / 2 - 120) : 120,
+      width: bounds ? Math.min(320, Math.max(220, bounds.width * 0.35)) : 240,
+      top: bounds ? Math.max(24, bounds.height / 2 - 40) : 200,
+      left: bounds ? Math.max(24, bounds.width / 2 - 120) : 120,
     };
     setSignatureStamps((prev) => [...prev, newStamp]);
     setActiveStampId(newStamp.id);
@@ -298,7 +335,7 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
           `<div style="position:absolute; left:${stamp.left}px; top:${stamp.top}px; width:${stamp.width}px; padding:12px 10px 8px 10px; background:transparent; border-radius:12px;">` +
           '<div style="font-size:11px; font-weight:600; color:#64748b; margin-bottom:4px;">Подписано:</div>' +
           `<img src="${stamp.dataUrl}" style="width:100%; height:auto; filter: drop-shadow(0 4px 8px rgba(15,23,42,0.25));" alt="Подпись" />` +
-          '</div>'
+          '</div>',
       )
       .join('');
     return `<div style="position:relative; min-height:1000px;">${content}<div style="position:absolute; inset:0;">${layerHtml}</div></div>`;
@@ -309,9 +346,10 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
     if (!file) return;
 
     try {
+      let nextContent = '';
       if (file.type === 'text/html') {
         const text = await file.text();
-        setContent(extractHtmlBody(text));
+        nextContent = extractHtmlBody(text);
       } else if (file.type === 'text/markdown' || file.name.endsWith('.md') || file.name.endsWith('.markdown')) {
         const text = await file.text();
         const html = text
@@ -321,30 +359,36 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
           .replace(/\*\*(.*?)\*\*/gim, '<b>$1</b>')
           .replace(/\*(.*?)\*/gim, '<i>$1</i>')
           .replace(/\n$/gim, '<br />');
-        setContent(`<div>${html}</div>`);
+        nextContent = `<div>${html}</div>`;
       } else if (file.type === 'text/plain') {
         const text = await file.text();
-        setContent(`<p>${text.replace(/\n/g, '<br>')}</p>`);
+        nextContent = `<p>${text.replace(/\n/g, '<br>')}</p>`;
       } else if (file.name.endsWith('.docx')) {
         const arrayBuffer = await file.arrayBuffer();
         const { value } = await mammoth.convertToHtml({ arrayBuffer });
-        setContent(extractHtmlBody(value));
+        nextContent = extractHtmlBody(value);
       } else if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
         const arrayBuffer = await file.arrayBuffer();
         const pdfjsLib = await import('pdfjs-dist');
         pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.js', import.meta.url).toString();
         const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
-        let fullText = '';
+        const paragraphs = [];
         for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
           const page = await pdf.getPage(pageNumber);
           const textContent = await page.getTextContent();
-          const pageText = textContent.items.map((item) => item.str).join(' ');
-          fullText += `${pageText}\n\n`;
+          const pageText = textContent.items.map((item) => item.str).join(' ').replace(/\s+/g, ' ').trim();
+          if (pageText) paragraphs.push(`<p>${pageText}</p>`);
         }
-        setContent(`<div>${fullText.replace(/\n/g, '<br>')}</div>`);
+        nextContent = paragraphs.join('');
       } else {
         alert('Поддерживаются форматы: .docx, .html, .txt, .md, .pdf');
+        event.target.value = '';
+        return;
       }
+
+      const sanitized = DOMPurify.sanitize(nextContent || '', { ADD_ATTR: ['style', 'class'] });
+      editor?.commands.setContent(sanitized, false);
+      setContent(sanitized);
       setSignatureStamps([]);
     } catch (err) {
       console.error(err);
@@ -394,6 +438,8 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
     if (format === 'docx') exportDocx();
     if (format === 'pdf') await exportPdf();
   };
+
+  const headingActive = (level) => editor?.isActive('heading', { level });
 
   return (
     <div className="flex flex-col h-full bg-[#F5F7FA] font-sans text-slate-800 overflow-hidden">
@@ -478,20 +524,20 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
       {!isMobile && (
         <div className="flex-none bg-white border-b border-slate-200 px-4 py-2 flex items-center justify-center gap-6 shadow-sm z-10">
           <div className="flex items-center gap-1 pr-4 border-r border-slate-200">
-            <ToolbarButton icon={RotateCcw} onClick={() => format('undo')} label="" />
-            <ToolbarButton icon={RotateCw} onClick={() => format('redo')} label="" />
+            <ToolbarButton icon={RotateCcw} onClick={() => editor?.commands.undo()} label="" />
+            <ToolbarButton icon={RotateCw} onClick={() => editor?.commands.redo()} label="" />
           </div>
 
           <div className="flex items-center gap-1 pr-4 border-r border-slate-200">
-            <ToolbarButton icon={Bold} onClick={() => format('bold')} label="Ж" />
-            <ToolbarButton icon={Italic} onClick={() => format('italic')} label="К" />
-            <ToolbarButton icon={Underline} onClick={() => format('underline')} label="Ч" />
+            <ToolbarButton icon={Bold} onClick={() => editor?.chain().focus().toggleBold().run()} label="Ж" active={editor?.isActive('bold')} />
+            <ToolbarButton icon={Italic} onClick={() => editor?.chain().focus().toggleItalic().run()} label="К" active={editor?.isActive('italic')} />
+            <ToolbarButton icon={Underline} onClick={() => editor?.chain().focus().toggleUnderline().run()} label="Ч" active={editor?.isActive('underline')} />
           </div>
 
           <div className="flex items-center gap-1 pr-4 border-r border-slate-200">
-            <ToolbarButton icon={Heading1} onClick={() => format('formatBlock', 'H2')} label="Ст. 1" />
-            <ToolbarButton icon={Heading2} onClick={() => format('formatBlock', 'H3')} label="п. 1.1" />
-            <ToolbarButton icon={ListOrdered} onClick={() => format('insertOrderedList')} label="1.2.3" />
+            <ToolbarButton icon={Heading1} onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).run()} label="Ст. 1" active={headingActive(2)} />
+            <ToolbarButton icon={Heading2} onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()} label="п. 1.1" active={headingActive(3)} />
+            <ToolbarButton icon={ListOrdered} onClick={() => editor?.chain().focus().toggleOrderedList().run()} label="1.2.3" active={editor?.isActive('orderedList')} />
           </div>
 
           <div className="relative">
@@ -505,7 +551,7 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
 
             {showInsertMenu && (
               <div className="absolute top-full left-0 mt-2 w-56 bg-white rounded-lg shadow-xl border border-slate-100 py-1 z-50">
-                <InsertMenuItem icon={Table} label="Таблица" onClick={() => handleInsert('Таблица')} />
+                <InsertMenuItem icon={TableIcon} label="Таблица" onClick={() => handleInsert('Таблица')} />
                 <InsertMenuItem icon={Scissors} label="Разрыв страницы" onClick={() => handleInsert('Разрыв')} />
                 <InsertMenuItem icon={Image} label="Изображение" onClick={() => handleInsert('Изображение')} />
                 <InsertMenuItem icon={Signature} label="Подпись" onClick={() => handleInsert('Подпись')} />
@@ -527,19 +573,7 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
               </div>
             )}
 
-            <div
-              ref={editorRef}
-              contentEditable
-              suppressContentEditableWarning
-              className={`
-                w-full h-full outline-none font-serif text-slate-900 leading-7
-                selection:bg-blue-100 selection:text-blue-900
-                ${isMobile ? 'p-6 text-base' : 'p-16 text-lg'}
-              `}
-              style={{ fontFamily: '"Merriweather", "Times New Roman", serif' }}
-              dangerouslySetInnerHTML={{ __html: content }}
-              onBlur={(e) => setContent(e.target.innerHTML)}
-            />
+            <EditorContent editor={editor} className={`${isMobile ? 'p-6 text-base' : 'p-16 text-lg'}`} />
 
             <div className="absolute inset-0 pointer-events-none">
               {signatureStamps.map((stamp) => (
@@ -608,8 +642,8 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
             </button>
 
             <div className="flex items-center gap-4">
-              <ToolbarButton isMobile icon={Bold} onClick={() => format('bold')} />
-              <ToolbarButton isMobile icon={Heading2} onClick={() => format('formatBlock', 'H3')} />
+              <ToolbarButton isMobile icon={Bold} onClick={() => editor?.chain().focus().toggleBold().run()} />
+              <ToolbarButton isMobile icon={Heading2} onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).run()} />
               <div className="w-px h-6 bg-slate-200" />
               <button className={`p-2 rounded-full ${trackChangesMode ? 'bg-orange-100 text-orange-600' : 'text-slate-400'}`} type="button">
                 <PenTool size={20} />
