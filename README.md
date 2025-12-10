@@ -3,6 +3,14 @@
 Минимальное веб‑приложение для загрузки, просмотра и штамповки PDF: FastAPI + PyMuPDF/pdfplumber на сервере и Vite/React (TypeScript) на клиенте.
 
 ## Быстрый старт
+
+### 1. Один шаг через Docker Compose (рекомендуется)
+```bash
+docker compose up --build
+```
+Откройте `http://127.0.0.1:8000` — FastAPI отдаёт собранный Vite фронтенд, загрузки сохраняются в `data/docs` (примонтирован в контейнер).
+
+### 2. Локально без Docker
 ```bash
 python -m venv .venv
 source .venv/bin/activate
@@ -10,14 +18,13 @@ pip install -r requirements.txt
 
 cd frontend
 npm install
-npm run dev # прокси на backend по /api
+npm run dev # SPA на 5173, бекенд на 8000
 ```
-Откройте `http://127.0.0.1:5173`. Для продакшена соберите фронтенд и поднимите API:
+В другом окне терминала запустите API:
 ```bash
-cd frontend && npm run build
 uvicorn app.main:app --reload
-# FastAPI будет отдавать собранный Vite из frontend/dist
 ```
+Откройте `http://127.0.0.1:5173` (dev) или выполните сборку `cd frontend && npm run build`, после чего `uvicorn` отдаст готовый бандл по `http://127.0.0.1:8000`.
 
 ## Возможности
 - Загрузка PDF на сервер (без клиентских конвертеров).
