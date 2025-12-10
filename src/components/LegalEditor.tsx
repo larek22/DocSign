@@ -62,6 +62,7 @@ type ConvertResponse = {
   tiptap?: JSONContent;
   warnings?: string[];
   plainText?: string;
+  engine?: string;
 };
 
 export type SignatureStampData = {
@@ -173,8 +174,7 @@ const SignatureStamp: React.FC<SignatureStampProps> = ({ stamp, isActive, onActi
       const left = payload?.left ?? stamp.left;
       const top = payload?.top ?? stamp.top;
       const width = payload?.width ?? stamp.width;
-      node.style.left = `${left}px`;
-      node.style.top = `${top}px`;
+      node.style.transform = `translate3d(${left}px, ${top}px, 0)`;
       node.style.width = `${width}px`;
     },
     [stamp.left, stamp.top, stamp.width],
@@ -289,15 +289,17 @@ const SignatureStamp: React.FC<SignatureStampProps> = ({ stamp, isActive, onActi
       ref={ref}
       className={`absolute group border-2 rounded-xl transition-all ${isActive ? 'border-blue-500 shadow-lg' : 'border-transparent'}`}
       style={{
-        left: `${stamp.left}px`,
-        top: `${stamp.top}px`,
+        left: 0,
+        top: 0,
         width: `${stamp.width}px`,
+        transform: `translate3d(${stamp.left}px, ${stamp.top}px, 0)`,
         padding: '12px 10px 8px 10px',
         background: 'transparent',
         cursor: 'grab',
         userSelect: 'none',
         pointerEvents: 'auto',
         touchAction: 'none',
+        willChange: 'transform,width',
       }}
       onPointerDown={handlePointerDown}
     >
@@ -490,8 +492,16 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
     setIsImporting(true);
     setImportStatus('Отправляем файл на сервер для конвертации…');
 
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf');
+
     const form = new FormData();
     form.append('file', file);
+    form.append('engine', isPdf ? 'pymupdf-bbox' : 'pandoc');
+    if (isPdf) {
+      form.append('stripLeftMarginPx', '48');
+      form.append('stripFooterPx', '60');
+      form.append('stripHeaderPx', '64');
+    }
 
     try {
       const response = await fetch('/api/convert-file', {
@@ -504,8 +514,13 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
         throw new Error(message || 'Сервер вернул ошибку при конвертации');
       }
 
-      const payload = (await response.json()) as ConvertResponse;
-      const { tiptap, html, plainText, warnings } = payload;
+      let payload: ConvertResponse;
+      try {
+        payload = (await response.json()) as ConvertResponse;
+      } catch (err) {
+        throw new Error('Сервер не вернул корректный JSON. Проверьте сервис конвертации.');
+      }
+      const { tiptap, html, plainText, warnings, engine } = payload;
 
       if (warnings?.length) {
         setImportStatus(warnings.join('\n'));
@@ -522,13 +537,20 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
         const sanitized = sanitizeHtml(`<p>${plainText.replace(/\n/g, '<br>')}</p>`);
         editor.commands.setContent(sanitized, false);
       } else {
-        throw new Error('Пустой ответ от сервиса конвертации');
+        setImportStatus('Сервер не вернул данных. Проверьте PyMuPDF/Pandoc конвертер.');
+      }
+
+      if (engine) {
+        setImportStatus(`Импорт выполнен через ${engine}.`);
       }
 
       setSignatureStamps([]);
     } catch (err) {
       console.error(err);
-      const message = err instanceof Error ? err.message : 'Не удалось импортировать файл. Попробуйте другой формат.';
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Не удалось импортировать файл. Проверьте серверную конвертацию (Pandoc/PyMuPDF).';
       setImportStatus(message);
       alert(message);
     } finally {
