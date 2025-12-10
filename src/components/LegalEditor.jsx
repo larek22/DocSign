@@ -105,6 +105,18 @@ const SidebarItem = ({ type, author, text, date, active }) => {
 
 const SignatureStamp = ({ stamp, isActive, onActivate, onDelete, onChange, boundsRef }) => {
   const ref = useRef(null);
+  const frameRef = useRef(null);
+  const pendingRef = useRef(null);
+
+  const flushPending = () => {
+    if (frameRef.current || !pendingRef.current) return;
+    frameRef.current = requestAnimationFrame(() => {
+      const payload = pendingRef.current;
+      pendingRef.current = null;
+      frameRef.current = null;
+      onChange(stamp.id, payload);
+    });
+  };
 
   useEffect(() => {
     if (!ref.current) return;
@@ -136,12 +148,21 @@ const SignatureStamp = ({ stamp, isActive, onActivate, onDelete, onChange, bound
       const clampedLeft = bounds ? Math.min(nextLeft, Math.max(0, bounds.width - stamp.width)) : nextLeft;
       const clampedTop = bounds ? Math.min(nextTop, Math.max(0, bounds.height - stampHeight)) : nextTop;
 
-      onChange(stamp.id, { left: clampedLeft, top: clampedTop });
+      pendingRef.current = { left: clampedLeft, top: clampedTop };
+      flushPending();
     };
 
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      if (frameRef.current) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+      if (pendingRef.current) {
+        onChange(stamp.id, pendingRef.current);
+        pendingRef.current = null;
+      }
     };
 
     window.addEventListener('pointermove', move);
@@ -159,12 +180,21 @@ const SignatureStamp = ({ stamp, isActive, onActivate, onDelete, onChange, bound
       moveEvent.preventDefault();
       const deltaX = moveEvent.clientX - startX;
       const nextWidth = Math.min(Math.max(120, startWidth + deltaX), 520);
-      onChange(stamp.id, { width: nextWidth });
+      pendingRef.current = { width: nextWidth };
+      flushPending();
     };
 
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
+      if (frameRef.current) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+      if (pendingRef.current) {
+        onChange(stamp.id, pendingRef.current);
+        pendingRef.current = null;
+      }
     };
 
     window.addEventListener('pointermove', move);
@@ -387,21 +417,33 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
         nextContent = extractHtmlBody(value);
       } else if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
         const arrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer), useWorkerFetch: false }).promise;
         const paragraphs = [];
 
         for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
           const page = await pdf.getPage(pageNumber);
           const textContent = await page.getTextContent();
-          const pageText = textContent.items
-            .map((item) => item.str)
-            .join(' ')
-            .replace(/\s+/g, ' ')
-            .trim();
-          if (pageText) paragraphs.push(`<p>${pageText}</p>`);
+          const lines = new Map();
+
+          textContent.items.forEach((item) => {
+            const y = Math.round(item.transform[5]);
+            const current = lines.get(y) || [];
+            current.push(item.str);
+            lines.set(y, current);
+          });
+
+          if (lines.size === 0) continue;
+          const sorted = Array.from(lines.entries())
+            .sort((a, b) => b[0] - a[0])
+            .map(([, parts]) => parts.join(' ').replace(/\s+/g, ' ').trim())
+            .filter(Boolean);
+
+          if (sorted.length) {
+            paragraphs.push(`<p>${sorted.join('<br>')}</p>`);
+          }
         }
 
-        nextContent = paragraphs.join('') || '<p>Не удалось извлечь текст из PDF.</p>';
+        nextContent = paragraphs.join('') || '<p>Не удалось извлечь текст из PDF (нет текстовых слоёв).</p>';
       } else {
         alert('Поддерживаются форматы: .docx, .html, .txt, .md, .pdf');
         event.target.value = '';
