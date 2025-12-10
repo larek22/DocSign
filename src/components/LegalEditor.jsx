@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import {
   Bold,
   Italic,
@@ -16,7 +16,16 @@ import {
   Signature,
   RotateCcw,
   RotateCw,
+  Download,
+  UploadCloud,
+  GripHorizontal,
+  X,
+  Maximize2,
 } from 'lucide-react';
+import mammoth from 'mammoth';
+import { saveAs } from 'file-saver';
+import html2canvas from 'html2canvas';
+import jsPDF from 'jspdf';
 
 const ToolbarButton = ({ icon: Icon, active, onClick, label, isMobile }) => (
   <button
@@ -81,13 +90,125 @@ const SidebarItem = ({ type, author, text, date, active }) => {
   );
 };
 
+const SignatureStamp = ({ stamp, isActive, onActivate, onDelete, onChange, boundsRef }) => {
+  const handlePointerDown = (e) => {
+    e.preventDefault();
+    onActivate(stamp.id);
+    const startX = e.clientX;
+    const startY = e.clientY;
+    const startLeft = stamp.left;
+    const startTop = stamp.top;
+
+    const move = (moveEvent) => {
+      moveEvent.preventDefault();
+      const bounds = boundsRef.current?.getBoundingClientRect();
+      const deltaX = moveEvent.clientX - startX;
+      const deltaY = moveEvent.clientY - startY;
+      const nextLeft = Math.max(0, startLeft + deltaX);
+      const nextTop = Math.max(0, startTop + deltaY);
+
+      const clampedLeft = bounds ? Math.min(nextLeft, bounds.width - stamp.width) : nextLeft;
+      const clampedTop = bounds ? Math.min(nextTop, bounds.height - stamp.height) : nextTop;
+
+      onChange(stamp.id, { left: clampedLeft, top: clampedTop });
+    };
+
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  const handleResize = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onActivate(stamp.id);
+    const startX = e.clientX;
+    const startWidth = stamp.width;
+
+    const move = (moveEvent) => {
+      moveEvent.preventDefault();
+      const deltaX = moveEvent.clientX - startX;
+      const nextWidth = Math.min(Math.max(120, startWidth + deltaX), 520);
+      onChange(stamp.id, { width: nextWidth });
+    };
+
+    const up = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', up);
+    };
+
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', up);
+  };
+
+  return (
+    <div
+      className={`absolute group border-2 rounded-xl transition-all ${isActive ? 'border-blue-500 shadow-lg' : 'border-transparent'}`}
+      style={{
+        left: `${stamp.left}px`,
+        top: `${stamp.top}px`,
+        width: `${stamp.width}px`,
+        padding: '12px 10px 8px 10px',
+        background: 'rgba(255,255,255,0.9)',
+        cursor: 'grab',
+        userSelect: 'none',
+      }}
+      onPointerDown={handlePointerDown}
+    >
+      <div className="text-[11px] text-slate-500 font-semibold mb-1 leading-none">Подписано:</div>
+      <img
+        src={stamp.dataUrl}
+        alt="Подпись"
+        style={{ width: '100%', height: 'auto', pointerEvents: 'none', filter: 'drop-shadow(0 4px 8px rgba(15,23,42,0.1))' }}
+      />
+
+      {isActive && (
+        <div className="absolute -top-10 left-1/2 -translate-x-1/2 bg-slate-900 text-white text-xs rounded-full px-3 py-1 shadow-lg flex items-center gap-2">
+          <GripHorizontal size={14} />
+          <span>Перетаскивайте / тяните угол</span>
+        </div>
+      )}
+
+      <button
+        type="button"
+        className="absolute -top-3 -right-3 bg-white border border-slate-200 rounded-full p-1 shadow-sm hover:bg-slate-100"
+        onClick={(e) => {
+          e.stopPropagation();
+          onDelete(stamp.id);
+        }}
+        aria-label="Удалить подпись"
+      >
+        <X size={14} className="text-slate-600" />
+      </button>
+
+      <button
+        type="button"
+        className="absolute -bottom-3 -right-3 bg-white border border-slate-200 rounded-full p-1 shadow-sm hover:bg-slate-100 cursor-se-resize"
+        onPointerDown={handleResize}
+        aria-label="Масштабировать подпись"
+      >
+        <Maximize2 size={14} className="text-slate-600" />
+      </button>
+    </div>
+  );
+};
+
 export default function LegalEditor({ onRequestSignature, initialContent, signatureData, onSignatureApplied }) {
   const [content, setContent] = useState(initialContent);
   const [showSidebar, setShowSidebar] = useState(true);
   const [showInsertMenu, setShowInsertMenu] = useState(false);
   const [trackChangesMode, setTrackChangesMode] = useState(true);
   const [isMobile, setIsMobile] = useState(false);
+  const [signatureStamps, setSignatureStamps] = useState([]);
+  const [activeStampId, setActiveStampId] = useState(null);
+  const [isExporting, setIsExporting] = useState(false);
   const editorRef = useRef(null);
+  const pageRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     const checkMobile = () => setIsMobile(window.innerWidth < 768);
@@ -116,6 +237,19 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
       insertHtml(pageBreakHtml);
     } else if (type === 'Подпись') {
       onRequestSignature();
+    } else if (type === 'Таблица') {
+      const tableHtml =
+        '<table style="width: 100%; border-collapse: collapse; margin: 16px 0;">' +
+        '<tr><th style="border: 1px solid #cbd5e1; padding: 8px; background:#f8fafc;">Столбец 1</th><th style="border: 1px solid #cbd5e1; padding: 8px; background:#f8fafc;">Столбец 2</th></tr>' +
+        '<tr><td style="border: 1px solid #cbd5e1; padding: 8px;">Значение</td><td style="border: 1px solid #cbd5e1; padding: 8px;">Значение</td></tr>' +
+        '</table>';
+      insertHtml(tableHtml);
+    } else if (type === 'Изображение') {
+      const url = window.prompt('Введите URL изображения');
+      if (url) {
+        const imageHtml = `<img src="${url}" alt="Вставленное изображение" style="max-width:100%; margin: 12px 0;" />`;
+        insertHtml(imageHtml);
+      }
     } else {
       alert(`В реальном приложении здесь откроется диалог вставки: ${type}`);
     }
@@ -123,13 +257,107 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
 
   useEffect(() => {
     if (!signatureData) return;
-    const signatureHtml = `<div style="margin-top: 16px; display: inline-flex; flex-direction: column; align-items: flex-start; gap: 4px;">
-      <span style="font-size: 12px; color: #475569;">Подписано:</span>
-      <img src="${signatureData}" alt="Подпись" style="height: 72px; object-fit: contain; filter: drop-shadow(0 4px 8px rgba(15,23,42,0.1));" />
-    </div>`;
-    insertHtml(signatureHtml);
+    const bounds = pageRef.current?.getBoundingClientRect();
+    const newStamp = {
+      id: crypto.randomUUID(),
+      dataUrl: signatureData,
+      width: 240,
+      top: bounds ? bounds.height / 2 - 40 : 200,
+      left: bounds ? bounds.width / 2 - 120 : 120,
+    };
+    setSignatureStamps((prev) => [...prev, newStamp]);
+    setActiveStampId(newStamp.id);
     onSignatureApplied?.();
   }, [signatureData, onSignatureApplied]);
+
+  const handleStampChange = (id, payload) => {
+    setSignatureStamps((prev) => prev.map((stamp) => (stamp.id === id ? { ...stamp, ...payload } : stamp)));
+  };
+
+  const handleDeleteStamp = (id) => {
+    setSignatureStamps((prev) => prev.filter((stamp) => stamp.id !== id));
+    if (activeStampId === id) setActiveStampId(null);
+  };
+
+  const combinedHtml = useMemo(() => {
+    const layerHtml = signatureStamps
+      .map(
+        (stamp) =>
+          `<div style="position:absolute; left:${stamp.left}px; top:${stamp.top}px; width:${stamp.width}px; padding:12px 10px 8px 10px; background:rgba(255,255,255,0.9); border-radius:12px;">` +
+          '<div style="font-size:11px; font-weight:600; color:#64748b; margin-bottom:4px;">Подписано:</div>' +
+          `<img src="${stamp.dataUrl}" style="width:100%; height:auto; filter: drop-shadow(0 4px 8px rgba(15,23,42,0.1));" alt="Подпись" />` +
+          '</div>'
+      )
+      .join('');
+    return `<div style="position:relative; min-height:1000px;">${content}<div style="position:absolute; inset:0;">${layerHtml}</div></div>`;
+  }, [content, signatureStamps]);
+
+  const handleImport = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    try {
+      if (file.type === 'text/html') {
+        const text = await file.text();
+        setContent(text);
+      } else if (file.type === 'text/plain') {
+        const text = await file.text();
+        setContent(`<p>${text.replace(/\n/g, '<br>')}</p>`);
+      } else if (file.name.endsWith('.docx')) {
+        const arrayBuffer = await file.arrayBuffer();
+        const { value } = await mammoth.convertToHtml({ arrayBuffer });
+        setContent(value);
+      } else {
+        alert('Поддерживаются форматы: .docx, .html, .txt');
+      }
+      setSignatureStamps([]);
+    } catch (err) {
+      console.error(err);
+      alert('Не удалось импортировать файл. Проверьте формат.');
+    } finally {
+      event.target.value = '';
+    }
+  };
+
+  const exportHtml = () => {
+    const blob = new Blob([combinedHtml], { type: 'text/html;charset=utf-8' });
+    saveAs(blob, 'document.html');
+  };
+
+  const exportDocx = () => {
+    const loadHtmlDocx = () =>
+      new Promise((resolve, reject) => {
+        if (window.htmlDocx) return resolve(window.htmlDocx);
+        const script = document.createElement('script');
+        script.src = 'https://unpkg.com/html-docx-js/dist/html-docx.js';
+        script.onload = () => resolve(window.htmlDocx);
+        script.onerror = reject;
+        document.body.appendChild(script);
+      });
+
+    loadHtmlDocx()
+      .then((htmlDocx) => {
+        const blob = htmlDocx.asBlob(combinedHtml);
+        saveAs(blob, 'document.docx');
+      })
+      .catch(() => alert('Не удалось загрузить модуль экспорта DOCX.'));
+  };
+
+  const exportPdf = async () => {
+    if (!pageRef.current) return;
+    setIsExporting(true);
+    const canvas = await html2canvas(pageRef.current, { scale: 2 });
+    const imgData = canvas.toDataURL('image/png');
+    const pdf = new jsPDF({ orientation: 'p', unit: 'px', format: [canvas.width, canvas.height] });
+    pdf.addImage(imgData, 'PNG', 0, 0, canvas.width, canvas.height);
+    pdf.save('document.pdf');
+    setIsExporting(false);
+  };
+
+  const handleExport = async (format) => {
+    if (format === 'html') exportHtml();
+    if (format === 'docx') exportDocx();
+    if (format === 'pdf') await exportPdf();
+  };
 
   return (
     <div className="flex flex-col h-full bg-[#F5F7FA] font-sans text-slate-800 overflow-hidden">
@@ -152,6 +380,35 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
         </div>
 
         <div className="flex items-center gap-2">
+          <div className="hidden md:flex items-center gap-2 mr-2">
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex items-center gap-2 px-3 py-2 text-sm bg-slate-50 text-slate-700 border border-slate-200 rounded-md hover:bg-slate-100 transition-colors"
+            >
+              <UploadCloud size={16} /> Импорт
+            </button>
+            <div className="relative group">
+              <button
+                type="button"
+                className="flex items-center gap-2 px-3 py-2 text-sm bg-slate-900 text-white rounded-md hover:bg-slate-800 transition-colors"
+              >
+                <Download size={16} /> Экспорт
+              </button>
+              <div className="absolute right-0 mt-2 w-44 bg-white shadow-lg border border-slate-200 rounded-xl opacity-0 group-hover:opacity-100 pointer-events-none group-hover:pointer-events-auto transition-all">
+                <button type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50" onClick={() => handleExport('html')}>
+                  HTML
+                </button>
+                <button type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50" onClick={() => handleExport('docx')}>
+                  DOCX
+                </button>
+                <button type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-slate-50" onClick={() => handleExport('pdf')} disabled={isExporting}>
+                  {isExporting ? 'PDF…' : 'PDF'}
+                </button>
+              </div>
+            </div>
+          </div>
+
           {!isMobile && (
             <div
               onClick={() => setTrackChangesMode(!trackChangesMode)}
@@ -224,7 +481,10 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
 
       <div className="flex-1 overflow-hidden flex relative">
         <div className="flex-1 overflow-y-auto bg-[#F5F7FA] flex justify-center py-8 px-4" onClick={() => setShowInsertMenu(false)}>
-          <div className="w-full max-w-[960px] min-h-[1100px] bg-white shadow-md border border-slate-200 mx-auto transition-all relative">
+          <div
+            ref={pageRef}
+            className="w-full max-w-[960px] min-h-[1100px] bg-white shadow-md border border-slate-200 mx-auto transition-all relative"
+          >
             {trackChangesMode && (
               <div className="absolute top-4 right-4 bg-orange-50 border border-orange-200 text-orange-600 px-3 py-1 text-xs rounded-full font-bold opacity-80 pointer-events-none">
                 TRACK CHANGES ON
@@ -244,6 +504,20 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
               dangerouslySetInnerHTML={{ __html: content }}
               onBlur={(e) => setContent(e.target.innerHTML)}
             />
+
+            <div className="absolute inset-0 pointer-events-none">
+              {signatureStamps.map((stamp) => (
+                <SignatureStamp
+                  key={stamp.id}
+                  stamp={stamp}
+                  isActive={activeStampId === stamp.id}
+                  onActivate={setActiveStampId}
+                  onDelete={handleDeleteStamp}
+                  onChange={handleStampChange}
+                  boundsRef={pageRef}
+                />
+              ))}
+            </div>
           </div>
         </div>
 
@@ -308,6 +582,14 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
           </div>
         </div>
       )}
+
+      <input
+        ref={fileInputRef}
+        className="hidden"
+        type="file"
+        accept=".docx,text/html,text/plain"
+        onChange={handleImport}
+      />
 
       <input type="hidden" value={content} readOnly />
     </div>
