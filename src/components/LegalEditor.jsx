@@ -153,9 +153,10 @@ const SignatureStamp = ({ stamp, isActive, onActivate, onDelete, onChange, bound
         top: `${stamp.top}px`,
         width: `${stamp.width}px`,
         padding: '12px 10px 8px 10px',
-        background: 'rgba(255,255,255,0.9)',
+        background: 'transparent',
         cursor: 'grab',
         userSelect: 'none',
+        pointerEvents: 'auto',
       }}
       onPointerDown={handlePointerDown}
     >
@@ -163,7 +164,7 @@ const SignatureStamp = ({ stamp, isActive, onActivate, onDelete, onChange, bound
       <img
         src={stamp.dataUrl}
         alt="Подпись"
-        style={{ width: '100%', height: 'auto', pointerEvents: 'none', filter: 'drop-shadow(0 4px 8px rgba(15,23,42,0.1))' }}
+        style={{ width: '100%', height: 'auto', pointerEvents: 'none', filter: 'drop-shadow(0 4px 8px rgba(15,23,42,0.25))' }}
       />
 
       {isActive && (
@@ -255,6 +256,17 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
     }
   };
 
+  const extractHtmlBody = (htmlString) => {
+    try {
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(htmlString, 'text/html');
+      return doc.body?.innerHTML?.trim() || htmlString;
+    } catch (err) {
+      console.warn('Не удалось разобрать HTML, используем исходное содержимое', err);
+      return htmlString;
+    }
+  };
+
   useEffect(() => {
     if (!signatureData) return;
     const bounds = pageRef.current?.getBoundingClientRect();
@@ -262,8 +274,8 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
       id: crypto.randomUUID(),
       dataUrl: signatureData,
       width: 240,
-      top: bounds ? bounds.height / 2 - 40 : 200,
-      left: bounds ? bounds.width / 2 - 120 : 120,
+      top: bounds ? Math.max(32, bounds.height / 2 - 40) : 200,
+      left: bounds ? Math.max(32, bounds.width / 2 - 120) : 120,
     };
     setSignatureStamps((prev) => [...prev, newStamp]);
     setActiveStampId(newStamp.id);
@@ -283,9 +295,9 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
     const layerHtml = signatureStamps
       .map(
         (stamp) =>
-          `<div style="position:absolute; left:${stamp.left}px; top:${stamp.top}px; width:${stamp.width}px; padding:12px 10px 8px 10px; background:rgba(255,255,255,0.9); border-radius:12px;">` +
+          `<div style="position:absolute; left:${stamp.left}px; top:${stamp.top}px; width:${stamp.width}px; padding:12px 10px 8px 10px; background:transparent; border-radius:12px;">` +
           '<div style="font-size:11px; font-weight:600; color:#64748b; margin-bottom:4px;">Подписано:</div>' +
-          `<img src="${stamp.dataUrl}" style="width:100%; height:auto; filter: drop-shadow(0 4px 8px rgba(15,23,42,0.1));" alt="Подпись" />` +
+          `<img src="${stamp.dataUrl}" style="width:100%; height:auto; filter: drop-shadow(0 4px 8px rgba(15,23,42,0.25));" alt="Подпись" />` +
           '</div>'
       )
       .join('');
@@ -295,19 +307,43 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
   const handleImport = async (event) => {
     const file = event.target.files?.[0];
     if (!file) return;
+
     try {
       if (file.type === 'text/html') {
         const text = await file.text();
-        setContent(text);
+        setContent(extractHtmlBody(text));
+      } else if (file.type === 'text/markdown' || file.name.endsWith('.md') || file.name.endsWith('.markdown')) {
+        const text = await file.text();
+        const html = text
+          .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+          .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+          .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+          .replace(/\*\*(.*?)\*\*/gim, '<b>$1</b>')
+          .replace(/\*(.*?)\*/gim, '<i>$1</i>')
+          .replace(/\n$/gim, '<br />');
+        setContent(`<div>${html}</div>`);
       } else if (file.type === 'text/plain') {
         const text = await file.text();
         setContent(`<p>${text.replace(/\n/g, '<br>')}</p>`);
       } else if (file.name.endsWith('.docx')) {
         const arrayBuffer = await file.arrayBuffer();
         const { value } = await mammoth.convertToHtml({ arrayBuffer });
-        setContent(value);
+        setContent(extractHtmlBody(value));
+      } else if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+        const arrayBuffer = await file.arrayBuffer();
+        const pdfjsLib = await import('pdfjs-dist');
+        pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('pdfjs-dist/build/pdf.worker.min.js', import.meta.url).toString();
+        const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        let fullText = '';
+        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+          const page = await pdf.getPage(pageNumber);
+          const textContent = await page.getTextContent();
+          const pageText = textContent.items.map((item) => item.str).join(' ');
+          fullText += `${pageText}\n\n`;
+        }
+        setContent(`<div>${fullText.replace(/\n/g, '<br>')}</div>`);
       } else {
-        alert('Поддерживаются форматы: .docx, .html, .txt');
+        alert('Поддерживаются форматы: .docx, .html, .txt, .md, .pdf');
       }
       setSignatureStamps([]);
     } catch (err) {
@@ -587,7 +623,7 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
         ref={fileInputRef}
         className="hidden"
         type="file"
-        accept=".docx,text/html,text/plain"
+        accept=".docx,.pdf,.md,.markdown,text/html,text/plain"
         onChange={handleImport}
       />
 
