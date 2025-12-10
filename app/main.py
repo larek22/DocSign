@@ -1,23 +1,34 @@
 import io
 import uuid
-from dataclasses import dataclass, asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Dict, List, Optional
 
 import fitz  # PyMuPDF
 import pdfplumber
-from fastapi import FastAPI, File, HTTPException, UploadFile
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from fastapi import Request
 
 DATA_DIR = Path("data/docs")
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="PyMuPDF Workbench", version="1.0.0")
-app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
-templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
+DIST_DIR = Path(__file__).parent.parent / "frontend" / "dist"
+
+app = FastAPI(title="PyMuPDF Workbench", version="1.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+if (Path(__file__).parent / "static").exists():
+    app.mount("/static", StaticFiles(directory=Path(__file__).parent / "static"), name="static")
+if DIST_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=DIST_DIR / "assets"), name="frontend-assets")
 
 
 @dataclass
@@ -80,9 +91,11 @@ def extract_tables(meta: DocumentMeta) -> List[List[List[str]]]:
     return tables
 
 
-@app.get("/", response_class=HTMLResponse)
-async def home(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request, "documents": [asdict(d) for d in documents.values()]})
+@app.get("/")
+async def spa_entry(_: Request):
+    if DIST_DIR.exists():
+        return FileResponse(DIST_DIR / "index.html")
+    return {"message": "Frontend build not found. Run npm install && npm run build in /frontend."}
 
 
 @app.post("/api/upload")
@@ -100,6 +113,11 @@ async def upload(file: UploadFile = File(...)):
     dest.write_bytes(raw)
     meta = register_document(dest, filename, pages)
     return {"document": asdict(meta)}
+
+
+@app.get("/api/docs")
+async def list_docs():
+    return {"documents": [asdict(doc) for doc in documents.values()]}
 
 
 @app.get("/api/docs/{doc_id}")
@@ -167,7 +185,12 @@ async def stamp(doc_id: str, payload: dict):
 async def download(doc_id: str):
     meta = get_document(doc_id)
     path = Path(meta.path)
-    return StreamingResponse(path.open("rb"), media_type="application/pdf", headers={"Content-Disposition": f"attachment; filename={Path(meta.filename).stem}-edited.pdf"})
+    filename = f"{Path(meta.filename).stem}-edited.pdf"
+    return StreamingResponse(
+        path.open("rb"),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )
 
 
 @app.delete("/api/docs/{doc_id}")

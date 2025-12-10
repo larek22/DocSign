@@ -1,26 +1,37 @@
-# PyMuPDF Workbench
+# PyMuPDF Workbench + Vite Frontend
 
-Минимальный web‑приложение на FastAPI для загрузки, извлечения текста и таблиц из PDF, предпросмотра страниц и простых штампов. Основано на PyMuPDF и pdfplumber. Все клиентские конвертеры удалены — импорт/обработка выполняется на сервере.
+Минимальное веб‑приложение для загрузки, просмотра и штамповки PDF: FastAPI + PyMuPDF/pdfplumber на сервере и Vite/React (TypeScript) на клиенте.
 
 ## Быстрый старт
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+
+cd frontend
+npm install
+npm run dev # прокси на backend по /api
 ```
-Зайдите на http://127.0.0.1:8000 и загрузите PDF.
+Откройте `http://127.0.0.1:5173`. Для продакшена соберите фронтенд и поднимите API:
+```bash
+cd frontend && npm run build
+uvicorn app.main:app --reload
+# FastAPI будет отдавать собранный Vite из frontend/dist
+```
 
 ## Возможности
-- Загрузка PDF и хранение на диске с метаданными.
+- Загрузка PDF на сервер (без клиентских конвертеров).
 - Извлечение текста с обрезкой полей (left/right/top/bottom) через PyMuPDF.
-- Вывод таблиц через pdfplumber.
-- Рендер страницы в PNG с нужным DPI.
-- Простая маркировка/штампы текстом на странице.
-- Скачать отредактированный PDF.
+- Извлечение таблиц через pdfplumber.
+- Рендер страниц в PNG с DPI.
+- Простой текстовый штамп (координаты/цвет/размер).
+- Скачивание отредактированного PDF.
+- SPA на Vite: загрузка файла, список документов, предпросмотр текста/таблиц/PNG, постановка штампа, выбор пресетов обрезки.
 
 ## API
+- `GET /health` — проверка сервера.
 - `POST /api/upload` – загрузка PDF.
+- `GET /api/docs` – список метаданных.
 - `GET /api/docs/{id}` – метаданные.
 - `GET /api/docs/{id}/text?left=40&top=30&bottom=30` – текст без полей.
 - `GET /api/docs/{id}/tables` – таблицы.
@@ -29,11 +40,11 @@ uvicorn app.main:app --reload
 - `GET /api/docs/{id}/download` – скачать PDF.
 - `DELETE /api/docs/{id}` – удалить.
 
-## Почему PyMuPDF + pdfplumber
+## Зачем PyMuPDF + pdfplumber
 - **PyMuPDF**: быстрые bbox и шрифты для точной очистки юридических PDF, рендер страниц и вставка штампов.
 - **pdfplumber**: извлечение таблиц поверх PyMuPDF.
 
 ## Заметки по продакшену
-- Храните файлы в S3/MinIO, а не на локальном диске.
-- Включите очистку временных файлов и лимиты размера запроса.
-- Поддержку DOCX/ODT/Markdown реализуйте через серверный конвертер (Pandoc) с загрузкой ассетов.
+- Храните файлы в S3/MinIO, добавьте очистку временных файлов и лимиты размера запроса.
+- Для импорта DOCX/ODT/Markdown используйте серверный конвертер (Pandoc/PyMuPDF pipeline) с загрузкой ассетов.
+- Включите CORS-ограничения под нужные домены и храните секреты вне кода.

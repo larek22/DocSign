@@ -9,3 +9,5 @@ __pycache__
 .DS_Store
 data/docs/*
 !data/docs/.gitkeep
+node_modules
+frontend/dist
