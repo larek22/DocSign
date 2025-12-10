@@ -18,6 +18,10 @@
 
 > **Важно для Windows/macOS с пробелами в пути.** Не запускайте `npm run build` из произвольной папки: используйте `start-local.bat`/`start-local.sh` или в консоли из корня проекта выполните `npm install` и `npm run build` — благодаря корневому `package.json` команды сами перейдут в `frontend/` и не упадут из‑за пробелов в пути.
 
+### 3. Локальная разработка (Vite dev + API одним шагом)
+- Из корня: `npm run dev` — автоматически установит фронтенд‑зависимости (hook `predev`), запустит `uvicorn app.main:app --reload` и Vite dev‑сервер с прокси на `http://127.0.0.1:8000`.
+- Если в dev видите `proxy error ECONNREFUSED` — значит API не запущен. Используйте `npm run dev` или `start-local.*`, чтобы поднять бекенд и фронтенд одновременно.
+
 ## Ручной запуск (если нужен терминал)
 - Установка фронтенда: `npm run install:frontend`
 - Сборка фронтенда: `npm run build`

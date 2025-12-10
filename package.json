@@ -3,7 +3,14 @@
   "private": true,
   "scripts": {
     "install:frontend": "cd frontend && npm install",
+    "prebuild": "npm run install:frontend",
     "build": "cd frontend && npm run build",
-    "dev:api": "uvicorn app.main:app --reload"
+    "dev:api": "uvicorn app.main:app --reload",
+    "dev:frontend": "cd frontend && npm run dev -- --host",
+    "predev": "npm run install:frontend",
+    "dev": "concurrently -k -n api,frontend -c blue,magenta \"npm run dev:api\" \"npm run dev:frontend\""
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
   }
 }
