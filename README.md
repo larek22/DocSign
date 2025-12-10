@@ -16,6 +16,13 @@
 
 Скрипты проверят наличие `python`/`node`, создадут `.venv`, установят `requirements.txt`, соберут Vite (`npm install && npm run build`) и запустят API на `http://127.0.0.1:8000` с уже собранным фронтендом.
 
+> **Важно для Windows/macOS с пробелами в пути.** Не запускайте `npm run build` из произвольной папки: используйте `start-local.bat`/`start-local.sh` или в консоли из корня проекта выполните `npm install` и `npm run build` — благодаря корневому `package.json` команды сами перейдут в `frontend/` и не упадут из‑за пробелов в пути.
+
+## Ручной запуск (если нужен терминал)
+- Установка фронтенда: `npm run install:frontend`
+- Сборка фронтенда: `npm run build`
+- Запуск API: `python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt && uvicorn app.main:app --reload`
+
 ## Возможности
 - Загрузка PDF на сервер (без клиентских конвертеров).
 - Извлечение текста с обрезкой полей (left/right/top/bottom) через PyMuPDF.

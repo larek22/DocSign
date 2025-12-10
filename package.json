@@ -1,0 +1,9 @@
+{
+  "name": "docsign-root",
+  "private": true,
+  "scripts": {
+    "install:frontend": "cd frontend && npm install",
+    "build": "cd frontend && npm run build",
+    "dev:api": "uvicorn app.main:app --reload"
+  }
+}
