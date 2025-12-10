@@ -4,27 +4,17 @@
 
 ## Быстрый старт
 
-### 1. Запуск в два клика (рекомендуется)
+### 1. Запуск в два клика на Docker (рекомендуется)
 - **Windows**: дважды кликните `start.bat` (требуется Docker Desktop).
 - **macOS/Linux**: `./start.sh` (предварительно `chmod +x start.sh`, требуется Docker).
 
 Скрипты сами выбирают `docker compose` или `docker-compose` и собирают образ. После старта откройте `http://127.0.0.1:8000` — FastAPI отдаёт собранный Vite фронтенд, загрузки сохраняются в `data/docs` (примонтирован в контейнер).
 
-### 2. Локально без Docker
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+### 2. Запуск в два клика без Docker
+- **Windows**: дважды кликните `start-local.bat` (создаёт venv, ставит Python/Node зависимости, собирает фронтенд и запускает `uvicorn`).
+- **macOS/Linux**: `./start-local.sh` (не забудьте `chmod +x start-local.sh` при первом запуске).
 
-cd frontend
-npm install
-npm run dev # SPA на 5173, бекенд на 8000
-```
-В другом окне терминала запустите API:
-```bash
-uvicorn app.main:app --reload
-```
-Откройте `http://127.0.0.1:5173` (dev) или выполните сборку `cd frontend && npm run build`, после чего `uvicorn` отдаст готовый бандл по `http://127.0.0.1:8000`.
+Скрипты проверят наличие `python`/`node`, создадут `.venv`, установят `requirements.txt`, соберут Vite (`npm install && npm run build`) и запустят API на `http://127.0.0.1:8000` с уже собранным фронтендом.
 
 ## Возможности
 - Загрузка PDF на сервер (без клиентских конвертеров).
