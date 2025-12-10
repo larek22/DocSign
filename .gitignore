@@ -1,4 +1,11 @@
-node_modules
-.dist
+__pycache__
+.venv
+*.pyc
+*.pyo
+*.swp
+.env
+.idea
+.vscode
 .DS_Store
-dist
+data/docs/*
+!data/docs/.gitkeep
