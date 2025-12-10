@@ -22,7 +22,7 @@ import {
   X,
   Maximize2,
 } from 'lucide-react';
-import { useEditor, EditorContent } from '@tiptap/react';
+import { useEditor, EditorContent, JSONContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import UnderlineExtension from '@tiptap/extension-underline';
 import ImageExtension from '@tiptap/extension-image';
@@ -31,14 +31,9 @@ import { TableRow } from '@tiptap/extension-table-row';
 import { TableCell } from '@tiptap/extension-table-cell';
 import { TableHeader } from '@tiptap/extension-table-header';
 import DOMPurify from 'dompurify';
-import mammoth from 'mammoth';
 import { saveAs } from 'file-saver';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
-import * as pdfjsLib from 'pdfjs-dist';
-import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-
-pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 type ToolbarButtonProps = {
   icon: React.ElementType;
@@ -60,6 +55,13 @@ type SidebarItemProps = {
   text: string;
   date: string;
   active?: boolean;
+};
+
+type ConvertResponse = {
+  html?: string;
+  tiptap?: JSONContent;
+  warnings?: string[];
+  plainText?: string;
 };
 
 export type SignatureStampData = {
@@ -94,64 +96,6 @@ declare global {
 }
 
 const sanitizeHtml = (html: string) => DOMPurify.sanitize(html, { ADD_ATTR: ['style', 'class'] });
-
-const parseMarkdownToHtml = (text: string) => {
-  const html = text
-    .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-    .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-    .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-    .replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>')
-    .replace(/\*(.*?)\*/gim, '<em>$1</em>')
-    .replace(/\n\n+/gim, '<br />');
-  return `<div>${html}</div>`;
-};
-
-const extractPdfText = async (file: File) => {
-  const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({
-    data: new Uint8Array(arrayBuffer),
-    useWorkerFetch: false,
-    isEvalSupported: false,
-  }).promise;
-
-  const paragraphs: string[] = [];
-
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const textContent = await page.getTextContent();
-    const lines: Map<number, { x: number; value: string }[]> = new Map();
-
-    textContent.items.forEach((item: any) => {
-      if (!('str' in item) || !item.str) return;
-      const yRaw = Array.isArray(item.transform) ? item.transform[5] : 0;
-      const xRaw = Array.isArray(item.transform) ? item.transform[4] : 0;
-      const y = Math.round(yRaw / 2) * 2;
-      const bucket = lines.get(y) ?? [];
-      bucket.push({ x: xRaw, value: item.str });
-      lines.set(y, bucket);
-    });
-
-    if (!lines.size) continue;
-
-    const sorted = Array.from(lines.entries())
-      .sort((a, b) => b[0] - a[0])
-      .map(([, entries]) =>
-        entries
-          .sort((a, b) => a.x - b.x)
-          .map((entry) => entry.value)
-          .join(' ')
-          .replace(/\s+/g, ' ')
-          .trim(),
-      )
-      .filter(Boolean);
-
-    if (sorted.length) {
-      paragraphs.push(`<p>${sorted.join('<br>')}</p>`);
-    }
-  }
-
-  return paragraphs.join('') || '<p>Не удалось извлечь текст из PDF (нет текстовых слоёв).</p>';
-};
 
 const ToolbarButton: React.FC<ToolbarButtonProps> = ({ icon: Icon, active, onClick, label, isMobile }) => (
   <button
@@ -219,7 +163,8 @@ const SidebarItem: React.FC<SidebarItemProps> = ({ type, author, text, date, act
 const SignatureStamp: React.FC<SignatureStampProps> = ({ stamp, isActive, onActivate, onDelete, onChange, boundsRef }) => {
   const ref = useRef<HTMLDivElement | null>(null);
   const frameRef = useRef<number | null>(null);
-  const pendingRef = useRef<Partial<SignatureStampData> | null>(null);
+  const pendingVisualRef = useRef<Partial<SignatureStampData> | null>(null);
+  const pendingCommitRef = useRef<Partial<SignatureStampData> | null>(null);
 
   const applyVisualStyle = useCallback(
     (payload?: Partial<SignatureStampData>) => {
@@ -239,15 +184,31 @@ const SignatureStamp: React.FC<SignatureStampProps> = ({ stamp, isActive, onActi
     applyVisualStyle();
   }, [applyVisualStyle]);
 
-  const flushPending = useCallback(() => {
-    if (frameRef.current || !pendingRef.current) return;
+  const flushVisual = useCallback(() => {
+    if (frameRef.current) return;
     frameRef.current = window.requestAnimationFrame(() => {
-      const payload = pendingRef.current;
-      pendingRef.current = null;
       frameRef.current = null;
-      onChange(stamp.id, payload ?? {});
+      if (pendingVisualRef.current) {
+        applyVisualStyle(pendingVisualRef.current);
+        pendingVisualRef.current = null;
+      }
     });
-  }, [onChange, stamp.id]);
+  }, [applyVisualStyle]);
+
+  const commitPending = useCallback(() => {
+    if (frameRef.current) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+    if (pendingVisualRef.current) {
+      applyVisualStyle(pendingVisualRef.current);
+      pendingVisualRef.current = null;
+    }
+    if (pendingCommitRef.current) {
+      onChange(stamp.id, pendingCommitRef.current);
+      pendingCommitRef.current = null;
+    }
+  }, [applyVisualStyle, onChange, stamp.id]);
 
   useEffect(() => {
     const node = ref.current;
@@ -281,22 +242,15 @@ const SignatureStamp: React.FC<SignatureStampProps> = ({ stamp, isActive, onActi
       const clampedTop = bounds ? Math.min(nextTop, Math.max(0, bounds.height - stampHeight)) : nextTop;
 
       const payload: Partial<SignatureStampData> = { left: clampedLeft, top: clampedTop };
-      applyVisualStyle(payload);
-      pendingRef.current = payload;
-      flushPending();
+      pendingVisualRef.current = payload;
+      pendingCommitRef.current = payload;
+      flushVisual();
     };
 
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      if (frameRef.current) {
-        cancelAnimationFrame(frameRef.current);
-        frameRef.current = null;
-      }
-      if (pendingRef.current) {
-        onChange(stamp.id, pendingRef.current);
-        pendingRef.current = null;
-      }
+      commitPending();
     };
 
     window.addEventListener('pointermove', move);
@@ -315,22 +269,15 @@ const SignatureStamp: React.FC<SignatureStampProps> = ({ stamp, isActive, onActi
       const deltaX = moveEvent.clientX - startX;
       const nextWidth = Math.min(Math.max(120, startWidth + deltaX), 520);
       const payload: Partial<SignatureStampData> = { width: nextWidth };
-      applyVisualStyle(payload);
-      pendingRef.current = payload;
-      flushPending();
+      pendingVisualRef.current = payload;
+      pendingCommitRef.current = payload;
+      flushVisual();
     };
 
     const up = () => {
       window.removeEventListener('pointermove', move);
       window.removeEventListener('pointerup', up);
-      if (frameRef.current) {
-        cancelAnimationFrame(frameRef.current);
-        frameRef.current = null;
-      }
-      if (pendingRef.current) {
-        onChange(stamp.id, pendingRef.current);
-        pendingRef.current = null;
-      }
+      commitPending();
     };
 
     window.addEventListener('pointermove', move);
@@ -401,6 +348,8 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
   const [signatureStamps, setSignatureStamps] = useState<SignatureStampData[]>([]);
   const [activeStampId, setActiveStampId] = useState<string | null>(null);
   const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [isImporting, setIsImporting] = useState<boolean>(false);
+  const [importStatus, setImportStatus] = useState<string>('');
   const pageRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
@@ -536,39 +485,54 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
 
   const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
+    if (!file || !editor) return;
+
+    setIsImporting(true);
+    setImportStatus('Отправляем файл на сервер для конвертации…');
+
+    const form = new FormData();
+    form.append('file', file);
 
     try {
-      let nextContent = '';
-      if (file.type === 'text/html') {
-        const text = await file.text();
-        nextContent = extractHtmlBody(text);
-      } else if (file.type === 'text/markdown' || file.name.endsWith('.md') || file.name.endsWith('.markdown')) {
-        const text = await file.text();
-        nextContent = parseMarkdownToHtml(text);
-      } else if (file.type === 'text/plain') {
-        const text = await file.text();
-        nextContent = `<p>${text.replace(/\n/g, '<br>')}</p>`;
-      } else if (file.name.endsWith('.docx')) {
-        const arrayBuffer = await file.arrayBuffer();
-        const { value } = await mammoth.convertToHtml({ arrayBuffer });
-        nextContent = extractHtmlBody(value);
-      } else if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-        nextContent = await extractPdfText(file);
-      } else {
-        alert('Поддерживаются форматы: .docx, .html, .txt, .md, .pdf');
-        event.target.value = '';
-        return;
+      const response = await fetch('/api/convert-file', {
+        method: 'POST',
+        body: form,
+      });
+
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(message || 'Сервер вернул ошибку при конвертации');
       }
 
-      const sanitized = sanitizeHtml(nextContent || '');
-      editor?.commands.setContent(sanitized, false);
-      setContent(sanitized);
+      const payload = (await response.json()) as ConvertResponse;
+      const { tiptap, html, plainText, warnings } = payload;
+
+      if (warnings?.length) {
+        setImportStatus(warnings.join('\n'));
+      } else {
+        setImportStatus('');
+      }
+
+      if (tiptap) {
+        editor.commands.setContent(tiptap, false);
+      } else if (html) {
+        const sanitized = sanitizeHtml(extractHtmlBody(html));
+        editor.commands.setContent(sanitized, false);
+      } else if (plainText) {
+        const sanitized = sanitizeHtml(`<p>${plainText.replace(/\n/g, '<br>')}</p>`);
+        editor.commands.setContent(sanitized, false);
+      } else {
+        throw new Error('Пустой ответ от сервиса конвертации');
+      }
+
       setSignatureStamps([]);
     } catch (err) {
       console.error(err);
-      alert('Не удалось импортировать файл. Проверьте формат.');
+      const message = err instanceof Error ? err.message : 'Не удалось импортировать файл. Попробуйте другой формат.';
+      setImportStatus(message);
+      alert(message);
     } finally {
+      setIsImporting(false);
       event.target.value = '';
     }
   };
@@ -641,10 +605,21 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
-              className="flex items-center gap-2 px-3 py-2 text-sm bg-slate-50 text-slate-700 border border-slate-200 rounded-md hover:bg-slate-100 transition-colors"
+              disabled={isImporting}
+              className={`flex items-center gap-2 px-3 py-2 text-sm rounded-md border transition-colors ${
+                isImporting
+                  ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-wait'
+                  : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+              }`}
             >
-              <UploadCloud size={16} /> Импорт
+              <UploadCloud size={16} />
+              {isImporting ? 'Импорт…' : 'Импорт'}
             </button>
+            {(isImporting || importStatus) && (
+              <div className="text-xs text-slate-500 max-w-xs leading-snug" title={importStatus || undefined}>
+                {isImporting ? 'Конвертация на сервере…' : importStatus}
+              </div>
+            )}
             <div className="relative group">
               <button
                 type="button"
@@ -832,7 +807,7 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
         ref={fileInputRef}
         className="hidden"
         type="file"
-        accept=".docx,.pdf,.md,.markdown,text/html,text/plain"
+        accept=".docx,.odt,.rtf,.pdf,.md,.markdown,text/html,text/plain"
         onChange={handleImport}
       />
 
