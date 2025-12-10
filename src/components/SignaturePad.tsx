@@ -1,9 +1,27 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { PenTool, Edit3, RotateCcw, RotateCw, Trash2, Check } from 'lucide-react';
 
-const cn = (...classes) => classes.filter(Boolean).join(' ');
+type ButtonProps = {
+  children?: React.ReactNode;
+  onClick: () => void;
+  variant?: 'primary' | 'secondary' | 'ghost' | 'tool' | 'toolActive';
+  className?: string;
+  icon?: React.ElementType;
+  disabled?: boolean;
+  title?: string;
+};
 
-const Button = ({ children, onClick, variant = 'primary', className = '', icon: Icon, disabled = false, title }) => {
+type Point = { x: number; y: number; pressure?: number; width?: number; time: number };
+type Path = { points: Point[]; color: string; tool: 'fountain' | 'ballpoint' };
+
+type SignaturePadProps = {
+  onSave: (dataUrl: string) => void;
+  onCancel: () => void;
+};
+
+const cn = (...classes: Array<string | undefined | false>) => classes.filter(Boolean).join(' ');
+
+const Button: React.FC<ButtonProps> = ({ children, onClick, variant = 'primary', className = '', icon: Icon, disabled = false, title }) => {
   const baseStyle = 'flex items-center justify-center gap-2 px-4 py-2 rounded-xl font-medium text-sm transition-all duration-200 active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed select-none';
   const variants = {
     primary: 'bg-slate-900 text-white hover:bg-slate-800 shadow-lg',
@@ -20,7 +38,12 @@ const Button = ({ children, onClick, variant = 'primary', className = '', icon: 
   );
 };
 
-const computePressure = (e, velocity, lastPressure, type) => {
+const computePressure = (
+  e: PointerEvent,
+  velocity: number,
+  lastPressure: number,
+  type: 'fountain' | 'ballpoint',
+) => {
   const hasHardwarePressure = e.pressure && e.pressure !== 0.5;
 
   if (hasHardwarePressure) {
@@ -41,20 +64,25 @@ const computePressure = (e, velocity, lastPressure, type) => {
   return lastPressure * cfg.smoothing + targetWidth * (1 - cfg.smoothing);
 };
 
-const SignaturePad = ({ onSave, onCancel }) => {
-  const canvasRef = useRef(null);
-  const containerRef = useRef(null);
+const SignaturePad: React.FC<SignaturePadProps> = ({ onSave, onCancel }) => {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
-  const [tool, setTool] = useState('fountain');
-  const [color, setColor] = useState('#0047AB');
-  const [history, setHistory] = useState([]);
-  const [redoStack, setRedoStack] = useState([]);
+  const [tool, setTool] = useState<'fountain' | 'ballpoint'>('fountain');
+  const [color, setColor] = useState<string>('#0047AB');
+  const [history, setHistory] = useState<Path[]>([]);
+  const [redoStack, setRedoStack] = useState<Path[]>([]);
 
-  const points = useRef([]);
-  const lastPressure = useRef(2);
-  const isDrawing = useRef(false);
+  const points = useRef<Point[]>([]);
+  const lastPressure = useRef<number>(2);
+  const isDrawing = useRef<boolean>(false);
 
-  const drawSegment = (ctx, p0, p1, p2) => {
+  const drawSegment = (
+    ctx: CanvasRenderingContext2D,
+    p0: Point & { width: number },
+    p1: Point & { width: number },
+    p2: Point & { width: number },
+  ) => {
     ctx.beginPath();
     const startX = (p0.x + p1.x) / 2;
     const startY = (p0.y + p1.y) / 2;
@@ -67,7 +95,7 @@ const SignaturePad = ({ onSave, onCancel }) => {
     ctx.stroke();
   };
 
-  const redraw = useCallback((ctx, paths) => {
+  const redraw = useCallback((ctx: CanvasRenderingContext2D, paths: Path[]) => {
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
 
     paths.forEach((path) => {
@@ -104,6 +132,7 @@ const SignaturePad = ({ onSave, onCancel }) => {
     canvas.style.height = `${rect.height}px`;
 
     const ctx = canvas.getContext('2d');
+    if (!ctx) return;
     ctx.scale(dpr, dpr);
     redraw(ctx, history);
   }, [history, redraw]);
@@ -114,19 +143,20 @@ const SignaturePad = ({ onSave, onCancel }) => {
     return () => observer.disconnect();
   }, [initCanvas]);
 
-  const getCoords = (e) => {
-    const rect = canvasRef.current.getBoundingClientRect();
+  const getCoords = (e: PointerEvent): Point => {
+    const rect = canvasRef.current?.getBoundingClientRect();
     return {
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top,
+      x: (e.clientX - (rect?.left ?? 0)),
+      y: (e.clientY - (rect?.top ?? 0)),
       pressure: e.pressure,
       time: Date.now(),
+      width: lastPressure.current,
     };
   };
 
-  const handlePointerDown = (e) => {
+  const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     e.preventDefault();
-    e.target.setPointerCapture(e.pointerId);
+    (e.target as HTMLCanvasElement).setPointerCapture(e.pointerId);
 
     isDrawing.current = true;
     const pt = getCoords(e);
@@ -134,19 +164,22 @@ const SignaturePad = ({ onSave, onCancel }) => {
     lastPressure.current = tool === 'ballpoint' ? 2 : 1.5;
     points.current = [{ ...pt, width: lastPressure.current }];
 
-    const ctx = canvasRef.current.getContext('2d');
+    const ctx = canvasRef.current?.getContext('2d');
+    if (!ctx) return;
     ctx.fillStyle = color;
     ctx.beginPath();
     ctx.arc(pt.x, pt.y, lastPressure.current / 2, 0, Math.PI * 2);
     ctx.fill();
   };
 
-  const handlePointerMove = (e) => {
+  const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!isDrawing.current) return;
     e.preventDefault();
 
-    const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
-    const ctx = canvasRef.current.getContext('2d');
+    const baseEvent = e.nativeEvent;
+    const events = baseEvent.getCoalescedEvents ? baseEvent.getCoalescedEvents() : [baseEvent];
+    const ctx = canvasRef.current?.getContext('2d');
+    if (!ctx) return;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.strokeStyle = color;
@@ -174,7 +207,7 @@ const SignaturePad = ({ onSave, onCancel }) => {
     });
   };
 
-  const handlePointerUp = (e) => {
+  const handlePointerUp = () => {
     if (!isDrawing.current) return;
     isDrawing.current = false;
 
@@ -190,8 +223,8 @@ const SignaturePad = ({ onSave, onCancel }) => {
     setHistory(next);
     setRedoStack([history[history.length - 1], ...redoStack]);
 
-    const ctx = canvasRef.current.getContext('2d');
-    redraw(ctx, next);
+    const ctx = canvasRef.current?.getContext('2d');
+    if (ctx) redraw(ctx, next);
   };
 
   const redo = () => {
@@ -200,16 +233,23 @@ const SignaturePad = ({ onSave, onCancel }) => {
     setHistory(next);
     setRedoStack(redoStack.slice(1));
 
-    const ctx = canvasRef.current.getContext('2d');
-    redraw(ctx, next);
+    const ctx = canvasRef.current?.getContext('2d');
+    if (ctx) redraw(ctx, next);
   };
 
   const clear = () => {
     setHistory([]);
     setRedoStack([]);
-    const ctx = canvasRef.current.getContext('2d');
+    const ctx = canvasRef.current?.getContext('2d');
+    if (!ctx) return;
     ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
   };
+
+  const handleSave = useCallback(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    onSave(canvas.toDataURL());
+  }, [onSave]);
 
   useEffect(() => {
     initCanvas();
@@ -291,7 +331,7 @@ const SignaturePad = ({ onSave, onCancel }) => {
 
         <div className="flex gap-3">
           <Button variant="ghost" onClick={onCancel}>Отмена</Button>
-          <Button variant="primary" onClick={() => onSave(canvasRef.current.toDataURL())} disabled={history.length === 0} icon={Check}>
+          <Button variant="primary" onClick={handleSave} disabled={history.length === 0} icon={Check}>
             Готово
           </Button>
         </div>

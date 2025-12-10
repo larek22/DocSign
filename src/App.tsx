@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { ShieldCheck, X } from 'lucide-react';
-import LegalEditor from './components/LegalEditor.jsx';
-import SignaturePad from './components/SignaturePad.jsx';
+import LegalEditor from './components/LegalEditor';
+import SignaturePad from './components/SignaturePad';
 
 const initialDocument = `
     <h1>ДОГОВОР ОКАЗАНИЯ ЮРИДИЧЕСКИХ УСЛУГ № 12/24</h1>
@@ -25,12 +25,12 @@ const initialDocument = `
   `;
 
 export default function App() {
-  const [showSignaturePad, setShowSignaturePad] = useState(false);
-  const [signatureData, setSignatureData] = useState(null);
+  const [showSignaturePad, setShowSignaturePad] = useState<boolean>(false);
+  const [signatureData, setSignatureData] = useState<string | null>(null);
 
   const handleOpenSignature = () => setShowSignaturePad(true);
 
-  const handleSaveSignature = (dataUrl) => {
+  const handleSaveSignature = (dataUrl: string) => {
     setSignatureData(dataUrl);
     setShowSignaturePad(false);
   };

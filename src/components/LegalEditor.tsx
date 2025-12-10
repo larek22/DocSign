@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bold,
   Italic,
@@ -40,7 +40,120 @@ import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
-const ToolbarButton = ({ icon: Icon, active, onClick, label, isMobile }) => (
+type ToolbarButtonProps = {
+  icon: React.ElementType;
+  active?: boolean;
+  onClick: () => void;
+  label?: string;
+  isMobile?: boolean;
+};
+
+type InsertMenuItemProps = {
+  icon: React.ElementType;
+  label: string;
+  onClick: () => void;
+};
+
+type SidebarItemProps = {
+  type: 'change' | 'comment';
+  author: string;
+  text: string;
+  date: string;
+  active?: boolean;
+};
+
+export type SignatureStampData = {
+  id: string;
+  dataUrl: string;
+  width: number;
+  top: number;
+  left: number;
+  height?: number;
+};
+
+type SignatureStampProps = {
+  stamp: SignatureStampData;
+  isActive: boolean;
+  onActivate: (id: string | null) => void;
+  onDelete: (id: string) => void;
+  onChange: (id: string, payload: Partial<SignatureStampData>) => void;
+  boundsRef: React.RefObject<HTMLDivElement>;
+};
+
+type LegalEditorProps = {
+  onRequestSignature: () => void;
+  initialContent: string;
+  signatureData: string | null;
+  onSignatureApplied?: () => void;
+};
+
+declare global {
+  interface Window {
+    htmlDocx?: any;
+  }
+}
+
+const sanitizeHtml = (html: string) => DOMPurify.sanitize(html, { ADD_ATTR: ['style', 'class'] });
+
+const parseMarkdownToHtml = (text: string) => {
+  const html = text
+    .replace(/^# (.*$)/gim, '<h1>$1</h1>')
+    .replace(/^## (.*$)/gim, '<h2>$1</h2>')
+    .replace(/^### (.*$)/gim, '<h3>$1</h3>')
+    .replace(/\*\*(.*?)\*\*/gim, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/gim, '<em>$1</em>')
+    .replace(/\n\n+/gim, '<br />');
+  return `<div>${html}</div>`;
+};
+
+const extractPdfText = async (file: File) => {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({
+    data: new Uint8Array(arrayBuffer),
+    useWorkerFetch: false,
+    isEvalSupported: false,
+  }).promise;
+
+  const paragraphs: string[] = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const textContent = await page.getTextContent();
+    const lines: Map<number, { x: number; value: string }[]> = new Map();
+
+    textContent.items.forEach((item: any) => {
+      if (!('str' in item) || !item.str) return;
+      const yRaw = Array.isArray(item.transform) ? item.transform[5] : 0;
+      const xRaw = Array.isArray(item.transform) ? item.transform[4] : 0;
+      const y = Math.round(yRaw / 2) * 2;
+      const bucket = lines.get(y) ?? [];
+      bucket.push({ x: xRaw, value: item.str });
+      lines.set(y, bucket);
+    });
+
+    if (!lines.size) continue;
+
+    const sorted = Array.from(lines.entries())
+      .sort((a, b) => b[0] - a[0])
+      .map(([, entries]) =>
+        entries
+          .sort((a, b) => a.x - b.x)
+          .map((entry) => entry.value)
+          .join(' ')
+          .replace(/\s+/g, ' ')
+          .trim(),
+      )
+      .filter(Boolean);
+
+    if (sorted.length) {
+      paragraphs.push(`<p>${sorted.join('<br>')}</p>`);
+    }
+  }
+
+  return paragraphs.join('') || '<p>Не удалось извлечь текст из PDF (нет текстовых слоёв).</p>';
+};
+
+const ToolbarButton: React.FC<ToolbarButtonProps> = ({ icon: Icon, active, onClick, label, isMobile }) => (
   <button
     onClick={onClick}
     className={`
@@ -56,7 +169,7 @@ const ToolbarButton = ({ icon: Icon, active, onClick, label, isMobile }) => (
   </button>
 );
 
-const InsertMenuItem = ({ icon: Icon, label, onClick }) => (
+const InsertMenuItem: React.FC<InsertMenuItemProps> = ({ icon: Icon, label, onClick }) => (
   <button
     onClick={onClick}
     className="w-full flex items-center px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 transition-colors"
@@ -67,7 +180,7 @@ const InsertMenuItem = ({ icon: Icon, label, onClick }) => (
   </button>
 );
 
-const SidebarItem = ({ type, author, text, date, active }) => {
+const SidebarItem: React.FC<SidebarItemProps> = ({ type, author, text, date, active }) => {
   const isChange = type === 'change';
 
   return (
@@ -103,31 +216,50 @@ const SidebarItem = ({ type, author, text, date, active }) => {
   );
 };
 
-const SignatureStamp = ({ stamp, isActive, onActivate, onDelete, onChange, boundsRef }) => {
-  const ref = useRef(null);
-  const frameRef = useRef(null);
-  const pendingRef = useRef(null);
+const SignatureStamp: React.FC<SignatureStampProps> = ({ stamp, isActive, onActivate, onDelete, onChange, boundsRef }) => {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const frameRef = useRef<number | null>(null);
+  const pendingRef = useRef<Partial<SignatureStampData> | null>(null);
 
-  const flushPending = () => {
+  const applyVisualStyle = useCallback(
+    (payload?: Partial<SignatureStampData>) => {
+      const node = ref.current;
+      if (!node) return;
+      const left = payload?.left ?? stamp.left;
+      const top = payload?.top ?? stamp.top;
+      const width = payload?.width ?? stamp.width;
+      node.style.left = `${left}px`;
+      node.style.top = `${top}px`;
+      node.style.width = `${width}px`;
+    },
+    [stamp.left, stamp.top, stamp.width],
+  );
+
+  useEffect(() => {
+    applyVisualStyle();
+  }, [applyVisualStyle]);
+
+  const flushPending = useCallback(() => {
     if (frameRef.current || !pendingRef.current) return;
-    frameRef.current = requestAnimationFrame(() => {
+    frameRef.current = window.requestAnimationFrame(() => {
       const payload = pendingRef.current;
       pendingRef.current = null;
       frameRef.current = null;
-      onChange(stamp.id, payload);
+      onChange(stamp.id, payload ?? {});
     });
-  };
+  }, [onChange, stamp.id]);
 
   useEffect(() => {
-    if (!ref.current) return;
-    const rect = ref.current.getBoundingClientRect();
+    const node = ref.current;
+    if (!node) return;
+    const rect = node.getBoundingClientRect();
     const height = rect.height;
     if (height && height !== stamp.height) {
       onChange(stamp.id, { height });
     }
-  }, [stamp.height, stamp.id, onChange]);
+  }, [onChange, stamp.height, stamp.id]);
 
-  const handlePointerDown = (e) => {
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.currentTarget.setPointerCapture(e.pointerId);
     onActivate(stamp.id);
@@ -136,7 +268,7 @@ const SignatureStamp = ({ stamp, isActive, onActivate, onDelete, onChange, bound
     const startLeft = stamp.left;
     const startTop = stamp.top;
 
-    const move = (moveEvent) => {
+    const move = (moveEvent: PointerEvent) => {
       moveEvent.preventDefault();
       const bounds = boundsRef.current?.getBoundingClientRect();
       const deltaX = moveEvent.clientX - startX;
@@ -148,7 +280,9 @@ const SignatureStamp = ({ stamp, isActive, onActivate, onDelete, onChange, bound
       const clampedLeft = bounds ? Math.min(nextLeft, Math.max(0, bounds.width - stamp.width)) : nextLeft;
       const clampedTop = bounds ? Math.min(nextTop, Math.max(0, bounds.height - stampHeight)) : nextTop;
 
-      pendingRef.current = { left: clampedLeft, top: clampedTop };
+      const payload: Partial<SignatureStampData> = { left: clampedLeft, top: clampedTop };
+      applyVisualStyle(payload);
+      pendingRef.current = payload;
       flushPending();
     };
 
@@ -169,18 +303,20 @@ const SignatureStamp = ({ stamp, isActive, onActivate, onDelete, onChange, bound
     window.addEventListener('pointerup', up);
   };
 
-  const handleResize = (e) => {
+  const handleResize = (e: React.PointerEvent<HTMLButtonElement>) => {
     e.preventDefault();
     e.stopPropagation();
     onActivate(stamp.id);
     const startX = e.clientX;
     const startWidth = stamp.width;
 
-    const move = (moveEvent) => {
+    const move = (moveEvent: PointerEvent) => {
       moveEvent.preventDefault();
       const deltaX = moveEvent.clientX - startX;
       const nextWidth = Math.min(Math.max(120, startWidth + deltaX), 520);
-      pendingRef.current = { width: nextWidth };
+      const payload: Partial<SignatureStampData> = { width: nextWidth };
+      applyVisualStyle(payload);
+      pendingRef.current = payload;
       flushPending();
     };
 
@@ -214,6 +350,7 @@ const SignatureStamp = ({ stamp, isActive, onActivate, onDelete, onChange, bound
         cursor: 'grab',
         userSelect: 'none',
         pointerEvents: 'auto',
+        touchAction: 'none',
       }}
       onPointerDown={handlePointerDown}
     >
@@ -255,22 +392,19 @@ const SignatureStamp = ({ stamp, isActive, onActivate, onDelete, onChange, bound
   );
 };
 
-export default function LegalEditor({ onRequestSignature, initialContent, signatureData, onSignatureApplied }) {
-  const [content, setContent] = useState(initialContent);
-  const [showSidebar, setShowSidebar] = useState(true);
-  const [showInsertMenu, setShowInsertMenu] = useState(false);
-  const [trackChangesMode, setTrackChangesMode] = useState(true);
-  const [isMobile, setIsMobile] = useState(false);
-  const [signatureStamps, setSignatureStamps] = useState([]);
-  const [activeStampId, setActiveStampId] = useState(null);
-  const [isExporting, setIsExporting] = useState(false);
-  const pageRef = useRef(null);
-  const fileInputRef = useRef(null);
+export default function LegalEditor({ onRequestSignature, initialContent, signatureData, onSignatureApplied }: LegalEditorProps) {
+  const [content, setContent] = useState<string>(initialContent);
+  const [showSidebar, setShowSidebar] = useState<boolean>(true);
+  const [showInsertMenu, setShowInsertMenu] = useState<boolean>(false);
+  const [trackChangesMode, setTrackChangesMode] = useState<boolean>(true);
+  const [isMobile, setIsMobile] = useState<boolean>(false);
+  const [signatureStamps, setSignatureStamps] = useState<SignatureStampData[]>([]);
+  const [activeStampId, setActiveStampId] = useState<string | null>(null);
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+  const pageRef = useRef<HTMLDivElement | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const sanitizedInitial = useMemo(
-    () => DOMPurify.sanitize(initialContent, { ADD_ATTR: ['style', 'class'] }),
-    [initialContent],
-  );
+  const sanitizedInitial = useMemo(() => sanitizeHtml(initialContent), [initialContent]);
 
   const editor = useEditor({
     extensions: [
@@ -311,37 +445,43 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
     }
   }, [editor, sanitizedInitial]);
 
-  const insertHtml = (html) => {
-    if (!editor) return;
-    editor.commands.focus();
-    editor.commands.insertContent(html);
-  };
+  const insertHtml = useCallback(
+    (html: string) => {
+      if (!editor) return;
+      editor.commands.focus();
+      editor.commands.insertContent(html);
+    },
+    [editor],
+  );
 
-  const handleInsert = (type) => {
-    setShowInsertMenu(false);
-    if (!editor) return;
+  const handleInsert = useCallback(
+    (type: string) => {
+      setShowInsertMenu(false);
+      if (!editor) return;
 
-    if (type === 'Разрыв') {
-      const pageBreakHtml =
-        '<div class="page-break" style="margin: 40px 0; border-bottom: 2px dashed #cbd5e1; position: relative; text-align: center;">' +
-        '<span style="background: #F5F7FA; padding: 0 10px; color: #64748b; font-size: 12px; position: relative; top: 10px;">Разрыв страницы</span>' +
-        '</div><br>';
-      insertHtml(pageBreakHtml);
-    } else if (type === 'Подпись') {
-      onRequestSignature();
-    } else if (type === 'Таблица') {
-      editor.chain().focus().insertTable({ rows: 3, cols: 2, withHeaderRow: true }).run();
-    } else if (type === 'Изображение') {
-      const url = window.prompt('Введите URL изображения');
-      if (url) {
-        editor.chain().focus().setImage({ src: url, alt: 'Вставленное изображение' }).run();
+      if (type === 'Разрыв') {
+        const pageBreakHtml =
+          '<div class="page-break" style="margin: 40px 0; border-bottom: 2px dashed #cbd5e1; position: relative; text-align: center;">' +
+          '<span style="background: #F5F7FA; padding: 0 10px; color: #64748b; font-size: 12px; position: relative; top: 10px;">Разрыв страницы</span>' +
+          '</div><br>';
+        insertHtml(pageBreakHtml);
+      } else if (type === 'Подпись') {
+        onRequestSignature();
+      } else if (type === 'Таблица') {
+        editor.chain().focus().insertTable({ rows: 3, cols: 2, withHeaderRow: true }).run();
+      } else if (type === 'Изображение') {
+        const url = window.prompt('Введите URL изображения');
+        if (url) {
+          editor.chain().focus().setImage({ src: url, alt: 'Вставленное изображение' }).run();
+        }
+      } else {
+        alert(`В реальном приложении здесь откроется диалог вставки: ${type}`);
       }
-    } else {
-      alert(`В реальном приложении здесь откроется диалог вставки: ${type}`);
-    }
-  };
+    },
+    [editor, insertHtml, onRequestSignature],
+  );
 
-  const extractHtmlBody = (htmlString) => {
+  const extractHtmlBody = useCallback((htmlString: string) => {
     try {
       const parser = new DOMParser();
       const doc = parser.parseFromString(htmlString, 'text/html');
@@ -350,13 +490,15 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
       console.warn('Не удалось разобрать HTML, используем исходное содержимое', err);
       return htmlString;
     }
-  };
+  }, []);
+
+  const createStampId = () => (typeof crypto !== 'undefined' && 'randomUUID' in crypto ? crypto.randomUUID() : String(Date.now()));
 
   useEffect(() => {
     if (!signatureData) return;
     const bounds = pageRef.current?.getBoundingClientRect();
-    const newStamp = {
-      id: crypto.randomUUID(),
+    const newStamp: SignatureStampData = {
+      id: createStampId(),
       dataUrl: signatureData,
       width: bounds ? Math.min(320, Math.max(220, bounds.width * 0.35)) : 240,
       top: bounds ? Math.max(24, bounds.height / 2 - 40) : 200,
@@ -367,14 +509,17 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
     onSignatureApplied?.();
   }, [signatureData, onSignatureApplied]);
 
-  const handleStampChange = (id, payload) => {
+  const handleStampChange = useCallback((id: string, payload: Partial<SignatureStampData>) => {
     setSignatureStamps((prev) => prev.map((stamp) => (stamp.id === id ? { ...stamp, ...payload } : stamp)));
-  };
+  }, []);
 
-  const handleDeleteStamp = (id) => {
-    setSignatureStamps((prev) => prev.filter((stamp) => stamp.id !== id));
-    if (activeStampId === id) setActiveStampId(null);
-  };
+  const handleDeleteStamp = useCallback(
+    (id: string) => {
+      setSignatureStamps((prev) => prev.filter((stamp) => stamp.id !== id));
+      if (activeStampId === id) setActiveStampId(null);
+    },
+    [activeStampId],
+  );
 
   const combinedHtml = useMemo(() => {
     const layerHtml = signatureStamps
@@ -389,7 +534,7 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
     return `<div style="position:relative; min-height:1000px;">${content}<div style="position:absolute; inset:0;">${layerHtml}</div></div>`;
   }, [content, signatureStamps]);
 
-  const handleImport = async (event) => {
+  const handleImport = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
@@ -400,14 +545,7 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
         nextContent = extractHtmlBody(text);
       } else if (file.type === 'text/markdown' || file.name.endsWith('.md') || file.name.endsWith('.markdown')) {
         const text = await file.text();
-        const html = text
-          .replace(/^# (.*$)/gim, '<h1>$1</h1>')
-          .replace(/^## (.*$)/gim, '<h2>$1</h2>')
-          .replace(/^### (.*$)/gim, '<h3>$1</h3>')
-          .replace(/\*\*(.*?)\*\*/gim, '<b>$1</b>')
-          .replace(/\*(.*?)\*/gim, '<i>$1</i>')
-          .replace(/\n$/gim, '<br />');
-        nextContent = `<div>${html}</div>`;
+        nextContent = parseMarkdownToHtml(text);
       } else if (file.type === 'text/plain') {
         const text = await file.text();
         nextContent = `<p>${text.replace(/\n/g, '<br>')}</p>`;
@@ -416,41 +554,14 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
         const { value } = await mammoth.convertToHtml({ arrayBuffer });
         nextContent = extractHtmlBody(value);
       } else if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
-        const arrayBuffer = await file.arrayBuffer();
-        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer), useWorkerFetch: false }).promise;
-        const paragraphs = [];
-
-        for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-          const page = await pdf.getPage(pageNumber);
-          const textContent = await page.getTextContent();
-          const lines = new Map();
-
-          textContent.items.forEach((item) => {
-            const y = Math.round(item.transform[5]);
-            const current = lines.get(y) || [];
-            current.push(item.str);
-            lines.set(y, current);
-          });
-
-          if (lines.size === 0) continue;
-          const sorted = Array.from(lines.entries())
-            .sort((a, b) => b[0] - a[0])
-            .map(([, parts]) => parts.join(' ').replace(/\s+/g, ' ').trim())
-            .filter(Boolean);
-
-          if (sorted.length) {
-            paragraphs.push(`<p>${sorted.join('<br>')}</p>`);
-          }
-        }
-
-        nextContent = paragraphs.join('') || '<p>Не удалось извлечь текст из PDF (нет текстовых слоёв).</p>';
+        nextContent = await extractPdfText(file);
       } else {
         alert('Поддерживаются форматы: .docx, .html, .txt, .md, .pdf');
         event.target.value = '';
         return;
       }
 
-      const sanitized = DOMPurify.sanitize(nextContent || '', { ADD_ATTR: ['style', 'class'] });
+      const sanitized = sanitizeHtml(nextContent || '');
       editor?.commands.setContent(sanitized, false);
       setContent(sanitized);
       setSignatureStamps([]);
@@ -497,13 +608,13 @@ export default function LegalEditor({ onRequestSignature, initialContent, signat
     setIsExporting(false);
   };
 
-  const handleExport = async (format) => {
+  const handleExport = async (format: 'html' | 'docx' | 'pdf') => {
     if (format === 'html') exportHtml();
     if (format === 'docx') exportDocx();
     if (format === 'pdf') await exportPdf();
   };
 
-  const headingActive = (level) => editor?.isActive('heading', { level });
+  const headingActive = (level: number) => editor?.isActive('heading', { level });
 
   return (
     <div className="flex flex-col h-full bg-[#F5F7FA] font-sans text-slate-800 overflow-hidden">
