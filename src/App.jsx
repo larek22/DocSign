@@ -23,6 +23,7 @@ import {
   Cpu,
   Shield,
   Plus,
+  X,
 } from 'lucide-react';
 
 const palette = {
@@ -117,32 +118,36 @@ const DesktopHero = ({ isDark, onNavigate }) => (
   <Surface
     isDark={isDark}
     onClick={() => onNavigate('scan')}
-    className="p-8 overflow-hidden cursor-pointer group min-h-[260px] flex"
+    className="p-6 sm:p-8 overflow-hidden cursor-pointer group min-h-[260px] flex flex-col xl:flex-row gap-6"
   >
     <div className="absolute inset-0 bg-gradient-to-r from-[#111] via-[#0b0b0b] to-transparent" />
     <div className="absolute inset-y-0 right-0 w-1/2 bg-[radial-gradient(circle_at_40%_40%,rgba(197,160,89,0.18),rgba(5,5,5,0))]" />
     <div className="relative flex-1 space-y-4">
       <Badge label="AI Analysis 2.0" tone="amber" />
-      <h1 className={`font-serif text-4xl leading-snug ${palette.textMain(isDark)}`}>
+      <h1 className={`font-serif text-3xl sm:text-4xl leading-snug ${palette.textMain(isDark)}`}>
         Elite contract review built for desktop counsel.
       </h1>
-      <p className={`${palette.textSubtle(isDark)} max-w-2xl`}>
+      <p className={`${palette.textSubtle(isDark)} max-w-2xl text-sm sm:text-base`}>
         Upload, triage, and co-author amendments without leaving your workflow. Precision risk detection meets elegant control.
       </p>
-      <div className="flex gap-3">
+      <div className="flex flex-wrap gap-3">
         <button
-          className="px-5 py-3 rounded-xl bg-white text-black font-semibold flex items-center gap-2 shadow-lg shadow-black/30"
+          className={`px-5 py-3 rounded-xl font-semibold flex items-center gap-2 shadow-lg shadow-black/30 ${
+            isDark ? 'bg-white text-black' : 'bg-black text-white'
+          }`}
         >
           Start a Scan <ArrowUpRight size={18} />
         </button>
         <button
-          className={`px-5 py-3 rounded-xl border ${isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'} flex items-center gap-2`}
+          className={`px-5 py-3 rounded-xl border ${
+            isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'
+          } flex items-center gap-2`}
         >
           Watch demo <Play size={16} />
         </button>
       </div>
     </div>
-    <div className="hidden xl:flex w-[360px] relative">
+    <div className="relative w-full xl:w-[360px]">
       <Surface
         isDark={isDark}
         className="w-full p-5 space-y-3 border border-white/10 bg-gradient-to-b from-white/5 to-transparent"
@@ -151,7 +156,7 @@ const DesktopHero = ({ isDark, onNavigate }) => (
           <p className={`text-sm ${palette.textSubtle(isDark)}`}>NDA_Draft_v0.4.pdf</p>
           <Shield className={palette.accent} size={18} />
         </div>
-        <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+        <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-white/5' : 'bg-black/10'}`}>
           <div className="h-full bg-[#C5A059] w-4/5" />
         </div>
         <div className={`text-sm ${palette.textMain(isDark)}`}>
@@ -187,7 +192,7 @@ const ScanView = ({ isDark, onBack }) => {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="flex items-center gap-3">
           <button
             onClick={onBack}
@@ -436,30 +441,161 @@ const Sidebar = ({ isDark }) => (
   </div>
 );
 
-const TopBar = ({ isDark, toggle }) => (
-  <div className="sticky top-0 z-20 backdrop-blur-xl bg-black/40 border-b border-white/5 px-6 py-4 flex items-center gap-4">
-    <button className="lg:hidden w-10 h-10 rounded-full flex items-center justify-center border border-white/10">
+const MobileNav = ({ isDark, open, onClose, onNavigate, toggle }) => (
+  <div
+    className={`lg:hidden fixed inset-0 z-30 transition ${
+      open ? 'pointer-events-auto' : 'pointer-events-none'
+    }`}
+  >
+    <div
+      className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity ${
+        open ? 'opacity-100' : 'opacity-0'
+      }`}
+      onClick={onClose}
+    />
+    <div
+      className={`absolute inset-y-0 right-0 w-[82%] max-w-sm ${
+        isDark ? 'bg-[#0d0d0d]' : 'bg-white'
+      } border-l ${isDark ? 'border-white/10' : 'border-black/10'} shadow-2xl transform transition-transform ${
+        open ? 'translate-x-0' : 'translate-x-full'
+      }`}
+    >
+      <div
+        className={`flex items-center justify-between px-4 py-4 border-b ${
+          isDark ? 'border-white/5' : 'border-black/10'
+        }`}
+      >
+        <div className="flex items-center gap-3">
+          <div
+            className={`w-10 h-10 rounded-full flex items-center justify-center border ${
+              isDark ? 'border-white/10 bg-white/5' : 'border-black/10 bg-black/5'
+            }`}
+          >
+            <span className={`font-serif font-bold text-xl ${palette.textMain(isDark)}`}>J.</span>
+          </div>
+          <div>
+            <p className={`text-xs uppercase tracking-[0.2em] ${palette.textSubtle(isDark)}`}>DocSign</p>
+            <p className={`font-semibold ${palette.textMain(isDark)}`}>Elite Jurist</p>
+          </div>
+        </div>
+        <button
+          onClick={onClose}
+          className={`w-10 h-10 rounded-full flex items-center justify-center border ${
+            isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'
+          }`}
+          aria-label="Close navigation"
+        >
+          <X size={18} />
+        </button>
+      </div>
+      <div className="p-4 space-y-4">
+        {[{ icon: Scale, label: 'Workspace' }, { icon: Search, label: 'Search' }, { icon: Bookmark, label: 'Bookmarks' }].map(
+          (item) => (
+            <div key={item.label} className="flex items-center gap-3 text-sm">
+              <item.icon size={18} className={palette.accent} />
+              <span className={`${palette.textMain(isDark)}`}>{item.label}</span>
+            </div>
+          )
+        )}
+        <div className="pt-3 border-t border-white/5 space-y-3">
+          <button
+            onClick={() => onNavigate('scan')}
+            className={`w-full px-4 py-3 rounded-xl font-semibold flex items-center justify-between ${
+              isDark ? 'bg-white text-black' : 'bg-black text-white'
+            }`}
+          >
+            Start scan <ArrowUpRight size={16} />
+          </button>
+          <button
+            onClick={toggle}
+            className={`w-full px-4 py-3 rounded-xl border flex items-center justify-between ${
+              isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'
+            }`}
+          >
+            {isDark ? 'Switch to light' : 'Switch to dark'}
+            <Zap size={16} className={palette.accent} />
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+const MobileDock = ({ isDark, onNavigate }) => (
+  <div className="lg:hidden fixed bottom-0 left-0 right-0 px-4 pb-4 z-20">
+    <div
+      className={`rounded-2xl border px-4 py-3 flex items-center justify-between shadow-2xl ${
+        palette.panel(isDark)
+      } ${palette.panelHover(isDark)}`}
+    >
+      {[{ icon: Scale, label: 'Desk' }, { icon: Search, label: 'Search' }, { icon: Zap, label: 'Scan' }, { icon: Fingerprint, label: 'Identity' }].map(
+        (item) => (
+          <button
+            key={item.label}
+            onClick={() => item.label === 'Scan' && onNavigate('scan')}
+            className={`flex flex-col items-center gap-1 text-xs ${palette.textSubtle(isDark)}`}
+          >
+            <div
+              className={`w-11 h-11 rounded-xl flex items-center justify-center ${
+                isDark ? 'bg-white/5' : 'bg-black/5'
+              }`}
+            >
+              <item.icon size={18} className={palette.accent} />
+            </div>
+            {item.label}
+          </button>
+        )
+      )}
+    </div>
+  </div>
+);
+
+const TopBar = ({ isDark, toggle, onOpenMobile }) => (
+  <div
+    className={`sticky top-0 z-20 backdrop-blur-xl px-4 sm:px-6 py-4 flex items-center gap-3 border-b ${
+      isDark ? 'bg-black/60 border-white/5' : 'bg-white/80 border-black/10'
+    }`}
+  >
+    <button
+      onClick={onOpenMobile}
+      className={`lg:hidden w-11 h-11 rounded-full flex items-center justify-center border ${
+        isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'
+      }`}
+      aria-label="Toggle navigation"
+    >
       <Menu size={18} />
     </button>
     <div className="flex-1 flex items-center gap-3">
-      <div className={`flex items-center gap-2 rounded-xl px-3 py-2 border ${isDark ? 'border-white/10 bg-white/5' : 'border-black/10 bg-white/60'}`}>
-        <Search size={16} className="text-white/60" />
+      <div
+        className={`flex items-center gap-2 rounded-xl px-3 py-2 border w-full sm:max-w-lg ${
+          isDark ? 'border-white/10 bg-white/5' : 'border-black/10 bg-white/70'
+        }`}
+      >
+        <Search size={16} className={isDark ? 'text-white/60' : 'text-black/60'} />
         <input
           className={`bg-transparent outline-none text-sm flex-1 ${palette.textMain(isDark)}`}
           placeholder="Search matters, clauses, or citations"
         />
       </div>
-      <button className={`px-3 py-2 rounded-lg border text-sm ${isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'}`}>
+      <button
+        className={`hidden sm:inline-flex px-3 py-2 rounded-lg border text-sm ${
+          isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'
+        }`}
+      >
         Filters
       </button>
     </div>
-    <div className="flex items-center gap-2">
-      <button className={`w-10 h-10 rounded-full border ${isDark ? 'border-white/10' : 'border-black/10'} flex items-center justify-center`}>
+    <div className="hidden sm:flex items-center gap-2">
+      <button
+        className={`w-10 h-10 rounded-full border ${isDark ? 'border-white/10' : 'border-black/10'} flex items-center justify-center`}
+      >
         <Bell size={18} className={palette.accent} />
       </button>
       <button
         onClick={toggle}
-        className={`px-4 py-2 rounded-lg border font-semibold ${isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'}`}
+        className={`px-4 py-2 rounded-lg border font-semibold ${
+          isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'
+        }`}
       >
         {isDark ? 'Light mode' : 'Dark mode'}
       </button>
@@ -470,6 +606,11 @@ const TopBar = ({ isDark, toggle }) => (
 export default function App() {
   const { isDark, toggle } = useTheme();
   const [view, setView] = useState('dashboard');
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  useEffect(() => {
+    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
+  }, [isDark]);
 
   return (
     <div className={`min-h-screen ${palette.bg(isDark)} text-white relative overflow-hidden`}>
@@ -480,13 +621,24 @@ export default function App() {
       <div className="relative flex">
         <Sidebar isDark={isDark} />
         <div className="flex-1 max-w-[1400px] mx-auto w-full">
-          <TopBar isDark={isDark} toggle={toggle} />
-          <main className="px-6 pb-14 space-y-8">
+          <TopBar isDark={isDark} toggle={toggle} onOpenMobile={() => setMobileNavOpen(true)} />
+          <main className="px-4 sm:px-6 pb-24 space-y-8">
             {view === 'dashboard' && <Dashboard isDark={isDark} onNavigate={setView} />}
             {view === 'scan' && <ScanView isDark={isDark} onBack={() => setView('dashboard')} />}
           </main>
         </div>
       </div>
+      <MobileNav
+        isDark={isDark}
+        open={mobileNavOpen}
+        onClose={() => setMobileNavOpen(false)}
+        onNavigate={(next) => {
+          setView(next);
+          setMobileNavOpen(false);
+        }}
+        toggle={toggle}
+      />
+      <MobileDock isDark={isDark} onNavigate={setView} />
     </div>
   );
 }
