@@ -111,7 +111,50 @@ const buildPipelineResult = (text, issues) => {
   };
 };
 
-const runPipeline = async ({ text, issues, apiKey }) => {
+const LLM_MODEL = 'gpt-4o-mini';
+
+const callLLM = async ({ system, user, apiKey, log }) => {
+  const payload = {
+    model: LLM_MODEL,
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: user },
+    ],
+    temperature: 0.2,
+  };
+
+  log?.('info', `LLM запрос (${LLM_MODEL})`, payload);
+
+  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    log?.('error', 'Ответ LLM вернул ошибку', { status: response.status, body: text });
+    throw new Error(`LLM ответ ${response.status}: ${text.slice(0, 200)}`);
+  }
+
+  const data = await response.json();
+  const content = data?.choices?.[0]?.message?.content;
+  log?.('info', 'LLM ответ получен', { content: content?.slice(0, 400) || 'пусто' });
+  return content;
+};
+
+const safeJSON = (str) => {
+  try {
+    return JSON.parse(str);
+  } catch (e) {
+    return null;
+  }
+};
+
+const runPipeline = async ({ text, issues, apiKey, log }) => {
   if (!text || !text.trim()) {
     throw new Error('Загруженный документ пуст или не удалось извлечь текст.');
   }
@@ -122,12 +165,54 @@ const runPipeline = async ({ text, issues, apiKey }) => {
 
   const finalIssues = issues?.length ? issues : extractIssuesFromText(text);
 
-  // Имитация сетевого вызова к LLM: задержка и локальный расчёт результата
-  await new Promise((resolve) => setTimeout(resolve, 600));
+  const parserPrompt = `Ты — AI-ассистент, специализирующийся на юридической структуре документов. Твоя задача: разбить входящий текст договора на логические блоки (Статьи/Пункты). Игнорируй колонтитулы и номера страниц. Определи тип документа (NDA, Договор поставки, Лицензионный договор). Выдели "Существенные условия" (Essential Terms) для данного типа договора согласно ГК РФ. Верни результат в формате JSON, где каждый пункт имеет ID и чистый текст.`;
+  const riskPrompt = `Ты — беспощадный старший юрист (Senior Associate) в топовой юридической фирме, защищающий интересы Исполнителя. Тебе переданы структурированные пункты договора в JSON. Найди любые условия, которые противоречат ГК РФ, создают финансовые риски, кабальны или двояко трактуются. Формат мысли: Цитата / Почему это плохо / Ссылка на закон / Вердикт (Критично/Внимание). Верни краткий список рисков в JSON.`;
+  const judgePrompt = `Ты — Партнер юридической фирмы и главный редактор. Проверь список рисков младшего юриста. Удали ложные срабатывания, оставь только влияющие на бизнес. Для каждого подтверджённого риска предложи идеальную формулировку (Gold Standard Clause) с компромиссным тоном для контрагента. Верни результат строго в JSON со структурой: {"document_meta":{...},"analysis":[{original_id,original_text,risk_level,issue_title,legal_basis,ai_suggestion,diff_highlight:{remove,add}}]}.`;
 
+  log?.('info', 'Шаг 1: парсинг документа', { length: text.length });
+  const parserAnswer = await callLLM({ system: parserPrompt, user: text.slice(0, 12000), apiKey, log });
+  const parserJSON = safeJSON(parserAnswer);
+  if (!parserJSON) {
+    throw new Error('LLM не вернул корректный JSON на этапе парсинга.');
+  }
+
+  log?.('info', 'Шаг 2: поиск рисков', { sections: parserJSON?.length || Object.keys(parserJSON || {}).length });
+  const redTeamAnswer = await callLLM({
+    system: riskPrompt,
+    user: JSON.stringify(parserJSON).slice(0, 12000),
+    apiKey,
+    log,
+  });
+  const redTeamJSON = safeJSON(redTeamAnswer);
+  if (!redTeamJSON) {
+    throw new Error('LLM не вернул корректный JSON на этапе поиска рисков.');
+  }
+
+  log?.('info', 'Шаг 3: финальный судья', { risks: Array.isArray(redTeamJSON) ? redTeamJSON.length : Object.keys(redTeamJSON || {}).length });
+  const judgeAnswer = await callLLM({
+    system: judgePrompt,
+    user: JSON.stringify(redTeamJSON).slice(0, 12000),
+    apiKey,
+    log,
+  });
+  const judgeJSON = safeJSON(judgeAnswer);
+  if (!judgeJSON?.analysis) {
+    log?.('error', 'Этап судьи вернул неожиданный формат', { judgeAnswer: judgeAnswer?.slice(0, 500) });
+    throw new Error('LLM не смог собрать финальный JSON. Проверьте логи.');
+  }
+
+  log?.('info', 'Pipeline завершён', { analysis: judgeJSON.analysis?.length || 0 });
   return {
-    pipeline: buildPipelineResult(text, finalIssues),
-    issues: finalIssues,
+    pipeline: judgeJSON,
+    issues: judgeJSON.analysis?.map((item, idx) => ({
+      id: item.original_id || `issue-${idx + 1}`,
+      type: item.risk_level?.toLowerCase() === 'critical' ? 'critical' : 'warning',
+      textMatch: item.diff_highlight?.remove || item.original_text,
+      title: item.issue_title || 'Риск',
+      description: item.legal_basis || 'Проверьте формулировку',
+      suggestion: item.diff_highlight?.add || item.ai_suggestion,
+      category: item.legal_basis || 'Общие положения',
+    })) || finalIssues,
   };
 };
 
@@ -180,6 +265,64 @@ const ApiKeyModal = ({ visible, onClose, onSave, apiKey, isDark }) => {
   );
 };
 
+const LogConsole = ({ visible, onClose, entries, isDark }) => {
+  const t = isDark ? theme.dark : theme.light;
+  if (!visible) return null;
+
+  return (
+    <div className={`fixed inset-0 z-[80] flex items-center justify-center ${t.bg} bg-opacity-90 animate-in`}>
+      <div className={`w-full max-w-4xl h-[70vh] rounded-2xl p-6 border ${t.border} ${t.paper} shadow-2xl relative overflow-hidden`}>
+        <button
+          aria-label="Закрыть"
+          onClick={onClose}
+          className={`absolute top-4 right-4 p-2 rounded-full ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}
+        >
+          <X size={18} />
+        </button>
+        <div className="flex items-center gap-3 mb-4">
+          <Activity className={t.accent} />
+          <h3 className={`text-xl font-serif-display ${t.textPrimary}`}>Логи пайплайна</h3>
+        </div>
+        <p className={`text-sm mb-4 ${t.textSecondary}`}>
+          Здесь отображаются запросы и ответы LLM, статусы шагов и ошибки. При обращении в поддержку приложите содержимое этого окна.
+        </p>
+        <div className="h-full overflow-auto hide-scrollbar space-y-3 pr-2">
+          {entries.length === 0 && <div className={`${t.textSecondary} text-sm`}>Логи пусты.</div>}
+          {entries.map((entry) => (
+            <div
+              key={entry.id}
+              className={`p-3 rounded-lg border ${t.border} ${isDark ? 'bg-white/5' : 'bg-black/5'} text-sm`}
+            >
+              <div className="flex justify-between items-center mb-1">
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[11px] font-semibold uppercase tracking-wider ${
+                    entry.level === 'error'
+                      ? 'bg-red-500/10 text-red-400'
+                      : entry.level === 'info'
+                      ? 'bg-amber-500/10 text-amber-500'
+                      : 'bg-emerald-500/10 text-emerald-400'
+                  }`}
+                >
+                  {entry.level}
+                </span>
+                <span className={`text-[11px] ${t.textSecondary}`}>
+                  {new Date(entry.timestamp).toLocaleTimeString('ru-RU')}
+                </span>
+              </div>
+              <div className={`${t.textPrimary} font-medium mb-1`}>{entry.message}</div>
+              {entry.data && (
+                <pre className={`text-[11px] whitespace-pre-wrap break-words ${t.textSecondary}`}>
+                  {JSON.stringify(entry.data, null, 2)}
+                </pre>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const StepIndicator = ({ status, label, isDark }) => {
   const t = isDark ? theme.dark : theme.light;
   return (
@@ -202,7 +345,7 @@ const StepIndicator = ({ status, label, isDark }) => {
   );
 };
 
-const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi, onError }) => {
+const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi, onError, onLog }) => {
   const t = isDark ? theme.dark : theme.light;
   const [step, setStep] = useState(0);
   const [error, setError] = useState('');
@@ -214,11 +357,17 @@ const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi
       try {
         setError('');
         setStep(1);
+        onLog?.('info', 'Старт пайплайна', { name: doc?.name, size: doc?.text?.length });
         await new Promise((resolve) => setTimeout(resolve, 800));
         setStep(2);
         await new Promise((resolve) => setTimeout(resolve, 1200));
         setStep(3);
-        const result = await runPipeline({ text: doc?.text, issues: doc?.issues, apiKey });
+        const result = await runPipeline({
+          text: doc?.text,
+          issues: doc?.issues,
+          apiKey,
+          log: onLog,
+        });
         if (cancelled) return;
         setStep(4);
         await new Promise((resolve) => setTimeout(resolve, 400));
@@ -226,6 +375,7 @@ const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi
       } catch (err) {
         if (cancelled) return;
         setError(err.message || 'Неизвестная ошибка при анализе документа.');
+        onLog?.('error', 'Ошибка пайплайна', { message: err.message });
         if (onError) onError(err.message || 'Ошибка анализа');
       }
     };
@@ -730,7 +880,7 @@ const RecentMatter = ({ matter, isDark }) => {
   );
 };
 
-const MobileExperience = ({ onSwitch, onOpenApi, apiKey }) => {
+const MobileExperience = ({ onSwitch, onOpenApi, apiKey, onLog, onOpenLogs }) => {
   const [isDark, setIsDark] = useState(true);
   const [view, setView] = useState('dashboard');
   const [matters, setMatters] = useState([
@@ -784,6 +934,7 @@ const MobileExperience = ({ onSwitch, onOpenApi, apiKey }) => {
           apiKey={apiKey}
           doc={pendingDoc}
           onOpenApi={onOpenApi}
+          onLog={onLog}
           onError={(message) => {
             setPipelineError(message || 'Не удалось завершить анализ.');
             setView('dashboard');
@@ -833,6 +984,15 @@ const MobileExperience = ({ onSwitch, onOpenApi, apiKey }) => {
                 className={`px-3 py-2 rounded-lg text-xs font-semibold ${isDark ? 'bg-white/10 text-white' : 'bg-black/5 text-black'}`}
               >
                 API ключ
+              </button>
+              <button
+                onClick={() => {
+                  onLog?.('info', 'Открытие окна логов', { source: 'mobile-header' });
+                  onOpenLogs?.();
+                }}
+                className={`px-3 py-2 rounded-lg text-xs font-semibold ${isDark ? 'bg-white/10 text-white' : 'bg-black/5 text-black'}`}
+              >
+                Логи
               </button>
               <button
                 onClick={onSwitch}
@@ -1105,7 +1265,7 @@ const DashboardView = ({ isDark, onStartUpload }) => (
 );
 
 
-const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey, pipelineError = '' }) => {
+const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey, pipelineError = '', onOpenLogs }) => {
   const { text, issues, name, pipeline } = documentData;
   const preview = text.split(/\n+/).filter(Boolean).slice(0, 6);
 
@@ -1154,6 +1314,14 @@ const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey, pipelineEr
           >
             {apiKey ? 'API подключен' : 'API не задан'}
           </span>
+          <button
+            onClick={onOpenLogs}
+            className={`px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider border ${
+              isDark ? 'border-white/10 text-white hover:bg-white/10' : 'border-black/10 text-black hover:bg-black/5'
+            }`}
+          >
+            Логи
+          </button>
           <button
             className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${
               isDark ? 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20' : 'bg-amber-50 text-amber-600'
@@ -1276,7 +1444,7 @@ const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey, pipelineEr
   );
 };
 
-const DesktopExperience = ({ onSwitch, apiKey, onOpenApi }) => {
+const DesktopExperience = ({ onSwitch, apiKey, onOpenApi, onLog, onOpenLogs }) => {
   const [isDark, setIsDark] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [collapsed, setCollapsed] = useState(false);
@@ -1321,6 +1489,7 @@ const DesktopExperience = ({ onSwitch, apiKey, onOpenApi }) => {
           apiKey={apiKey}
           doc={pendingDoc}
           onOpenApi={onOpenApi}
+          onLog={onLog}
           onError={(message) => {
             setPipelineError(message || 'Не удалось завершить анализ.');
             setShowPipeline(false);
@@ -1409,6 +1578,16 @@ const DesktopExperience = ({ onSwitch, apiKey, onOpenApi }) => {
           >
             <KeyRound size={18} />
           </button>
+          <button
+            onClick={() => {
+              onLog?.('info', 'Открытие логов', { source: 'desktop-sidebar' });
+              onOpenLogs?.();
+            }}
+            className={`p-3 rounded-xl transition-colors ${isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-black'}`}
+            aria-label="Логи пайплайна"
+          >
+            <Activity size={18} />
+          </button>
         </div>
       </aside>
 
@@ -1424,6 +1603,7 @@ const DesktopExperience = ({ onSwitch, apiKey, onOpenApi }) => {
             onEdit={() => setShowEditor(true)}
             apiKey={apiKey}
             pipelineError={pipelineError}
+            onOpenLogs={onOpenLogs}
           />
         )}
       </main>
@@ -1436,6 +1616,15 @@ export default function App() {
   const [mode, setMode] = useState('desktop');
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('jurist_api_key') || '');
   const [showApiModal, setShowApiModal] = useState(false);
+  const [showLogs, setShowLogs] = useState(false);
+  const [logEntries, setLogEntries] = useState([]);
+
+  const appendLog = (level, message, data) => {
+    setLogEntries((prev) => {
+      const next = [...prev, { id: `${Date.now()}-${Math.random()}`, level, message, data, timestamp: Date.now() }];
+      return next.slice(-200);
+    });
+  };
 
   useEffect(() => {
     localStorage.setItem('jurist_api_key', apiKey || '');
@@ -1450,17 +1639,27 @@ export default function App() {
         apiKey={apiKey}
         isDark={mode === 'desktop'}
       />
+      <LogConsole
+        visible={showLogs}
+        onClose={() => setShowLogs(false)}
+        entries={logEntries}
+        isDark={mode === 'desktop'}
+      />
       {mode === 'desktop' ? (
         <DesktopExperience
           onSwitch={() => setMode('mobile')}
           apiKey={apiKey}
           onOpenApi={() => setShowApiModal(true)}
+          onLog={appendLog}
+          onOpenLogs={() => setShowLogs(true)}
         />
       ) : (
         <MobileExperience
           onSwitch={() => setMode('desktop')}
           onOpenApi={() => setShowApiModal(true)}
           apiKey={apiKey}
+          onLog={appendLog}
+          onOpenLogs={() => setShowLogs(true)}
         />
       )}
     </div>
