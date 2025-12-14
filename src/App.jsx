@@ -124,8 +124,8 @@ const callLLM = async ({ system, user, apiKey, log, settings }) => {
   const max_tokens = settings?.maxTokens ? Number(settings.maxTokens) : undefined;
   const top_p = settings?.topP ? Number(settings.topP) : undefined;
 
-  // gpt-5-mini не принимает пользовательскую температуру — вовсе не отправляем параметр.
   const isGpt5Mini = model?.startsWith('gpt-5-mini');
+  const useResponsesApi = isGpt5Mini; // для gpt-5-mini используем Responses API и не отправляем temperature
   const temperature = !isGpt5Mini && !Number.isNaN(rawTemperature) ? rawTemperature : undefined;
   if (isGpt5Mini && rawTemperature !== undefined) {
     log?.('info', 'Температура не отправлена для gpt-5-mini: модель использует встроенное значение', {
@@ -133,26 +133,45 @@ const callLLM = async ({ system, user, apiKey, log, settings }) => {
     });
   }
 
-  // gpt-5-mini ожидает параметр max_completion_tokens вместо устаревшего max_tokens
-  const tokenField = model?.startsWith('gpt-5') ? 'max_completion_tokens' : 'max_tokens';
+  // responses API ожидает max_output_tokens, chat completions — max_tokens / max_completion_tokens
+  const tokenField = useResponsesApi
+    ? 'max_output_tokens'
+    : model?.startsWith('gpt-5')
+    ? 'max_completion_tokens'
+    : 'max_tokens';
 
-  const payload = {
-    model,
-    messages: [
-      { role: 'system', content: system },
-      { role: 'user', content: user },
-    ],
-    // temperature намеренно не передаём для gpt-5-mini, чтобы избежать ошибок API
-    ...(!isGpt5Mini && temperature !== undefined ? { temperature } : {}),
-    ...(typeof max_tokens === 'number' && !Number.isNaN(max_tokens)
-      ? { [tokenField]: max_tokens }
-      : {}),
-    ...(typeof top_p === 'number' && !Number.isNaN(top_p) ? { top_p } : {}),
-  };
+  const payload = useResponsesApi
+    ? {
+        model,
+        input: [
+          { role: 'system', content: [{ type: 'text', text: system }] },
+          { role: 'user', content: [{ type: 'text', text: user }] },
+        ],
+        ...(typeof max_tokens === 'number' && !Number.isNaN(max_tokens)
+          ? { [tokenField]: max_tokens }
+          : {}),
+        ...(typeof top_p === 'number' && !Number.isNaN(top_p) ? { top_p } : {}),
+      }
+    : {
+        model,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user },
+        ],
+        ...(!isGpt5Mini && temperature !== undefined ? { temperature } : {}),
+        ...(typeof max_tokens === 'number' && !Number.isNaN(max_tokens)
+          ? { [tokenField]: max_tokens }
+          : {}),
+        ...(typeof top_p === 'number' && !Number.isNaN(top_p) ? { top_p } : {}),
+      };
 
-  log?.('info', `LLM запрос (${model})`, { ...payload, messages: undefined });
+  log?.('info', `LLM запрос (${model})`, {
+    ...payload,
+    messages: undefined,
+    input: undefined,
+  });
 
-  const response = await fetch('https://api.openai.com/v1/chat/completions', {
+  const response = await fetch(useResponsesApi ? 'https://api.openai.com/v1/responses' : 'https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -168,7 +187,19 @@ const callLLM = async ({ system, user, apiKey, log, settings }) => {
   }
 
   const data = await response.json();
-  const content = data?.choices?.[0]?.message?.content;
+
+  const extractText = () => {
+    if (data?.output_text) return data.output_text;
+    if (Array.isArray(data?.output)) {
+      return data.output
+        .flatMap((item) => item?.content || [])
+        .map((c) => c?.text || '')
+        .join('');
+    }
+    return data?.choices?.[0]?.message?.content;
+  };
+
+  const content = extractText();
   log?.('info', 'LLM ответ получен', { content: content?.slice(0, 400) || 'пусто' });
   return content;
 };
