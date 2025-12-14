@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Scale,
   FileText,
@@ -25,6 +25,11 @@ import {
   Activity,
   ShieldAlert,
 } from 'lucide-react';
+import * as pdfjsLib from 'pdfjs-dist';
+import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import mammoth from 'mammoth';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorker;
 
 // --- ОБЩИЕ СТИЛИ И ТЕМА ---
 const Fonts = () => (
@@ -69,6 +74,80 @@ const theme = {
   },
 };
 
+const extractIssuesFromText = (text) => {
+  const candidates = [
+    {
+      id: 'liability',
+      type: 'critical',
+      textMatch: 'независимо от наличия вины',
+      title: 'Риск безусловной ответственности',
+      description:
+        'Формулировка возлагает ответственность даже при отсутствии вины. Это создаёт чрезмерные риски для исполнителя.',
+      suggestion: 'при наличии документально подтверждённой вины (умысла или грубой неосторожности)',
+      category: 'Ответственность (ст. 401 ГК РФ)',
+    },
+    {
+      id: 'uncapped-penalty',
+      type: 'warning',
+      textMatch: '5 000 000',
+      title: 'Высокая неустойка',
+      description: 'Размер неустойки выглядит завышенным и может быть признан несоразмерным.',
+      suggestion: '1 000 000 (один миллион) рублей либо 2x стоимости контракта',
+      category: 'Ответственность',
+    },
+    {
+      id: 'perpetual-term',
+      type: 'warning',
+      textMatch: 'действует бессрочно',
+      title: 'Бессрочный характер обязательств',
+      description:
+        'Бессрочные обязательства могут ограничивать конкуренцию. Рекомендуется установить разумный срок охраны.',
+      suggestion: 'действует в течение 5 (пяти) лет с момента передачи информации',
+      category: 'Срок действия',
+    },
+  ];
+
+  return candidates.filter((issue) => text.toLowerCase().includes(issue.textMatch.toLowerCase()));
+};
+
+const extractTextFromPdf = async (arrayBuffer) => {
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const pageTexts = [];
+
+  for (let i = 1; i <= pdf.numPages; i += 1) {
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    const strings = content.items.map((item) => item.str).join(' ');
+    pageTexts.push(strings);
+  }
+
+  return pageTexts.join('\n');
+};
+
+const extractTextFromDocx = async (arrayBuffer) => {
+  const { value } = await mammoth.extractRawText({ arrayBuffer });
+  return value;
+};
+
+const readFileAsText = (file) =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = reject;
+    reader.readAsText(file, 'utf-8');
+  });
+
+const parseFileToText = async (file) => {
+  const extension = file.name.split('.').pop()?.toLowerCase();
+  if (extension === 'pdf') {
+    return extractTextFromPdf(await file.arrayBuffer());
+  }
+  if (extension === 'docx') {
+    return extractTextFromDocx(await file.arrayBuffer());
+  }
+  return readFileAsText(file);
+};
+
 // --- МОБИЛЬНЫЕ КОМПОНЕНТЫ ---
 const Button = ({ children, variant = 'primary', onClick, className = '', isDark, disabled }) => {
   const base =
@@ -92,21 +171,35 @@ const Button = ({ children, variant = 'primary', onClick, className = '', isDark
 
 const UploadScreen = ({ isDark, onUploadComplete, onCancel }) => {
   const t = isDark ? theme.dark : theme.light;
+  const inputRef = useRef(null);
   const [isScanning, setIsScanning] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [error, setError] = useState('');
 
-  const handleSimulateUpload = () => {
+  const handlePick = () => {
+    setError('');
+    inputRef.current?.click();
+  };
+
+  const handleFile = async (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
     setIsScanning(true);
-    const interval = setInterval(() => {
-      setProgress((prev) => {
-        if (prev >= 100) {
-          clearInterval(interval);
-          setTimeout(onUploadComplete, 500);
-          return 100;
-        }
-        return prev + 2;
-      });
-    }, 30);
+    setProgress(4);
+    try {
+      const text = await parseFileToText(file);
+      setProgress(80);
+      const issues = extractIssuesFromText(text);
+      setProgress(100);
+      setTimeout(() => onUploadComplete({ text, issues, name: file.name }), 300);
+    } catch (err) {
+      setError('Не удалось прочитать файл. Попробуйте TXT, PDF или DOCX.');
+      console.error(err);
+      setIsScanning(false);
+      setProgress(0);
+    } finally {
+      event.target.value = '';
+    }
   };
 
   return (
@@ -116,8 +209,16 @@ const UploadScreen = ({ isDark, onUploadComplete, onCancel }) => {
       </button>
 
       <div className="w-full max-w-md px-6">
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".pdf,.docx,.txt,.md,.rtf"
+          className="hidden"
+          onChange={handleFile}
+        />
+
         <div
-          onClick={!isScanning ? handleSimulateUpload : undefined}
+          onClick={!isScanning ? handlePick : undefined}
           className={`
             relative aspect-[4/5] rounded-3xl border-2 border-dashed transition-all duration-500 flex flex-col items-center justify-center cursor-pointer group overflow-hidden
             ${isScanning ? 'border-transparent bg-black/5' : `${t.border} hover:border-[#C5A059]`}
@@ -131,7 +232,7 @@ const UploadScreen = ({ isDark, onUploadComplete, onCancel }) => {
                 <div className={`w-16 h-16 rounded-2xl mb-6 flex items-center justify-center ${t.accentBg} text-black animate-pulse`}>
                   <FileText size={32} />
                 </div>
-                <h3 className={`font-serif-display text-xl ${t.textPrimary} mb-2`}>Анализ структуры...</h3>
+                <h3 className={`font-serif-display text-xl ${t.textPrimary} mb-2`}>Читаем документ...</h3>
                 <p className={`font-mono text-sm ${t.accent}`}>{progress}%</p>
               </div>
             </>
@@ -141,13 +242,14 @@ const UploadScreen = ({ isDark, onUploadComplete, onCancel }) => {
                 <UploadCloud size={32} className={t.accent} />
               </div>
               <h3 className={`font-serif-display text-2xl ${t.textPrimary} mb-2`}>Загрузите договор</h3>
-              <p className={`text-sm ${t.textSecondary} mb-8`}>
-                PDF, DOCX или изображение.
-                <br />AI распознает текст автоматически.
+              <p className={`text-sm ${t.textSecondary} mb-6`}>
+                Поддерживаемые форматы: PDF, DOCX, TXT.
+                <br />AI автоматически найдёт риски.
               </p>
-              <Button variant="primary" isDark={isDark} className="pointer-events-none">
+              <Button variant="primary" isDark={isDark}>
                 Выбрать файл
               </Button>
+              {error && <p className="text-xs text-red-400 mt-3">{error}</p>}
             </div>
           )}
         </div>
@@ -174,35 +276,28 @@ const INITIAL_TEXT = `
 4. Применимое право. К отношениям сторон применяется право Российской Федерации. Споры подлежат разрешению в Арбитражном суде г. Москвы.
 `;
 
-const INITIAL_ISSUES = [
-  {
-    id: 'issue-1',
-    type: 'critical',
-    textMatch: 'независимо от наличия вины',
-    title: 'Риск безусловной ответственности',
-    description:
-      'Формулировка возлагает ответственность даже при отсутствии вины. Это создает чрезмерные риски для Исполнителя.',
-    suggestion: 'при наличии документально подтвержденной вины (умысла или грубой неосторожности)',
-    category: 'Ответственность (ст. 401 ГК РФ)',
-  },
-  {
-    id: 'issue-2',
-    type: 'warning',
-    textMatch: 'действует бессрочно',
-    title: 'Бессрочный характер обязательств',
-    description:
-      'Бессрочные обязательства могут ограничивать конкуренцию. Рекомендуется установить разумный срок охраны.',
-    suggestion: 'действует в течение 5 (пяти) лет с момента передачи информации',
-    category: 'Срок действия',
-  },
-];
+const INITIAL_ISSUES = extractIssuesFromText(INITIAL_TEXT);
 
-const DocumentWorkspace = ({ isDark, onBack, onSave }) => {
+const DocumentWorkspace = ({
+  isDark,
+  onBack,
+  onSave,
+  initialText = INITIAL_TEXT,
+  initialIssues = INITIAL_ISSUES,
+  fileName = 'Документ',
+}) => {
   const t = isDark ? theme.dark : theme.light;
-  const [text, setText] = useState(INITIAL_TEXT);
-  const [issues, setIssues] = useState(INITIAL_ISSUES);
+  const [text, setText] = useState(initialText);
+  const [issues, setIssues] = useState(initialIssues);
   const [selectedIssue, setSelectedIssue] = useState(null);
   const [isAllClean, setIsAllClean] = useState(false);
+
+  useEffect(() => {
+    setText(initialText);
+    setIssues(initialIssues);
+    setSelectedIssue(null);
+    setIsAllClean(initialIssues.length === 0);
+  }, [initialIssues, initialText]);
 
   const handleApplyFix = (issue) => {
     const newText = text.replace(issue.textMatch, issue.suggestion);
@@ -211,6 +306,10 @@ const DocumentWorkspace = ({ isDark, onBack, onSave }) => {
     setIssues(remaining);
     setSelectedIssue(null);
     if (remaining.length === 0) setTimeout(() => setIsAllClean(true), 400);
+  };
+
+  const handleSave = () => {
+    onSave?.({ issuesCount: issues.length, text, issues });
   };
 
   const interactiveText = useMemo(() => {
@@ -249,7 +348,7 @@ const DocumentWorkspace = ({ isDark, onBack, onSave }) => {
           <p className={`text-sm ${t.textSecondary} mb-8`}>
             Все критические риски устранены. Документ готов к подписанию.
           </p>
-          <Button variant="primary" isDark={isDark} onClick={() => onSave(0)} className="w-full">
+          <Button variant="primary" isDark={isDark} onClick={handleSave} className="w-full">
             Сохранить в архив
           </Button>
         </div>
@@ -265,7 +364,7 @@ const DocumentWorkspace = ({ isDark, onBack, onSave }) => {
             <X size={20} />
           </button>
           <div>
-            <h3 className={`font-serif-display text-lg ${t.textPrimary}`}>Режим правки</h3>
+            <h3 className={`font-serif-display text-lg ${t.textPrimary}`}>{fileName}</h3>
             <p className={`text-xs ${t.textSecondary} flex items-center gap-2`}>
               {issues.length === 0 ? (
                 <span className="text-emerald-500 font-medium flex items-center gap-1">
@@ -279,7 +378,7 @@ const DocumentWorkspace = ({ isDark, onBack, onSave }) => {
             </p>
           </div>
         </div>
-        <Button variant="ghost" className={`!text-xs ${t.textSecondary}`} onClick={() => onSave(issues.length)}>
+        <Button variant="ghost" className={`!text-xs ${t.textSecondary}`} onClick={handleSave}>
           Сохранить как есть
         </Button>
       </div>
@@ -423,14 +522,20 @@ const MobileExperience = ({ onSwitch }) => {
     { id: 1, title: 'Договор поставки #542', date: 'Сегодня', status: 'Attention' },
     { id: 2, title: 'NDA с партнёром', date: 'Вчера', status: 'Cleared' },
   ]);
+  const [documentData, setDocumentData] = useState({
+    text: INITIAL_TEXT,
+    issues: INITIAL_ISSUES,
+    name: 'NDA_Draft_ru.txt',
+  });
 
   const t = isDark ? theme.dark : theme.light;
 
-  const handleSaveResult = (issuesCount) => {
+  const handleSaveResult = ({ issuesCount, text, issues }) => {
+    setDocumentData((prev) => ({ ...prev, text, issues }));
     const next = [
       {
         id: Date.now(),
-        title: `Договор NDA #${Math.floor(Math.random() * 900) + 100}`,
+        title: documentData.name,
         date: new Date().toLocaleDateString('ru-RU'),
         status: issuesCount === 0 ? 'Cleared' : 'Attention',
       },
@@ -444,9 +549,25 @@ const MobileExperience = ({ onSwitch }) => {
     <div className={`min-h-screen transition-colors duration-700 font-sans-ui ${t.bg} selection:bg-[#C5A059]/30`}> 
       <Fonts />
       {view === 'upload' && (
-        <UploadScreen isDark={isDark} onCancel={() => setView('dashboard')} onUploadComplete={() => setView('workspace')} />
+        <UploadScreen
+          isDark={isDark}
+          onCancel={() => setView('dashboard')}
+          onUploadComplete={(data) => {
+            setDocumentData({ text: data.text, issues: data.issues, name: data.name });
+            setView('workspace');
+          }}
+        />
       )}
-      {view === 'workspace' && <DocumentWorkspace isDark={isDark} onBack={() => setView('dashboard')} onSave={handleSaveResult} />}
+      {view === 'workspace' && (
+        <DocumentWorkspace
+          isDark={isDark}
+          onBack={() => setView('dashboard')}
+          onSave={handleSaveResult}
+          initialText={documentData.text}
+          initialIssues={documentData.issues}
+          fileName={documentData.name}
+        />
+      )}
 
       {view === 'dashboard' && (
         <div className="pb-24 max-w-lg mx-auto min-h-screen flex flex-col relative">
@@ -632,7 +753,7 @@ const TableRow = ({ client, caseName, status, date, isDark }) => (
   </tr>
 );
 
-const DashboardView = ({ isDark, onStartAnalysis }) => (
+const DashboardView = ({ isDark, onStartUpload }) => (
   <div className="p-8 max-w-[1600px] mx-auto animate-in fade-in duration-700">
     <div className="flex justify-between items-end mb-10">
       <div>
@@ -646,7 +767,7 @@ const DashboardView = ({ isDark, onStartAnalysis }) => (
           className={`px-6 py-3 rounded-full text-sm font-bold tracking-widest uppercase transition-all ${
             isDark ? 'bg-white text-black hover:bg-gray-200' : 'bg-[#1A1A1A] text-white hover:bg-gray-800'
           }`}
-          onClick={onStartAnalysis}
+          onClick={onStartUpload}
         >
           + Новое дело
         </button>
@@ -654,7 +775,7 @@ const DashboardView = ({ isDark, onStartAnalysis }) => (
     </div>
 
     <div className="grid grid-cols-12 gap-6 mb-10">
-      <div className="col-span-12 lg:col-span-8 relative overflow-hidden rounded-[24px] group cursor-pointer shadow-2xl" onClick={onStartAnalysis}>
+      <div className="col-span-12 lg:col-span-8 relative overflow-hidden rounded-[24px] group cursor-pointer shadow-2xl" onClick={onStartUpload}>
         <div className="absolute inset-0 bg-[#0F1115]">
           <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-[#1a237e] opacity-20 blur-[120px] rounded-full" />
           <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-[#C5A059] opacity-10 blur-[100px] rounded-full" />
@@ -720,110 +841,193 @@ const DashboardView = ({ isDark, onStartAnalysis }) => (
   </div>
 );
 
-const DocumentAnalysisView = ({ isDark }) => (
-  <div className="h-screen flex flex-col animate-in slide-in-from-bottom-4">
-    <div className={`h-16 border-b flex items-center justify-between px-6 ${isDark ? 'border-white/5 bg-[#0B0C10]' : 'border-black/5 bg-white'}`}>
-      <div className="flex items-center gap-4">
-        <h2 className={`font-serif text-lg ${desktopStyles.textMain(isDark)}`}>NDA_Draft_v0.4.pdf</h2>
-        <span className="px-2 py-0.5 rounded text-[10px] bg-gray-500/20 text-gray-500 font-bold uppercase">Только чтение</span>
-      </div>
-      <div className="flex items-center gap-3">
-        <button
-          className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${
-            isDark ? 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20' : 'bg-amber-50 text-amber-600'
-          }`}
-        >
-          <AlertTriangle size={14} /> 2 риска
-        </button>
-        <div className={`h-6 w-[1px] ${isDark ? 'bg-white/10' : 'bg-black/10'}`} />
-        <button className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider ${isDark ? 'bg-white text-black' : 'bg-black text-white'}`}>
-          Экспорт отчёта
-        </button>
-      </div>
-    </div>
+const DocumentAnalysisView = ({ isDark, documentData, onEdit }) => {
+  const { text, issues, name } = documentData;
+  const preview = text.split(/\n+/).filter(Boolean).slice(0, 6);
 
-    <div className="flex-1 flex overflow-hidden">
-      <div className={`flex-1 overflow-y-auto p-12 flex justify-center ${isDark ? 'bg-[#121212]' : 'bg-[#F2F0E9]'}`}>
-        <div className={`w-[800px] min-h-[1000px] shadow-2xl p-16 relative ${isDark ? 'bg-[#1E1E1E] text-gray-300' : 'bg-white text-gray-800'}`}>
-          <div className="mb-12 flex justify-between">
-            <div className="w-32 h-8 bg-current opacity-10 rounded" />
-            <div className="w-24 h-4 bg-current opacity-10 rounded" />
+  const renderPreview = (paragraph) => {
+    let parts = [{ text: paragraph, type: 'normal', id: null }];
+    issues.forEach((issue) => {
+      const next = [];
+      parts.forEach((part) => {
+        if (part.type !== 'normal') {
+          next.push(part);
+          return;
+        }
+        const idx = part.text.toLowerCase().indexOf(issue.textMatch.toLowerCase());
+        if (idx === -1) {
+          next.push(part);
+        } else {
+          if (idx > 0) next.push({ text: part.text.slice(0, idx), type: 'normal' });
+          next.push({ text: part.text.slice(idx, idx + issue.textMatch.length), type: issue.type, id: issue.id });
+          if (idx + issue.textMatch.length < part.text.length) {
+            next.push({ text: part.text.slice(idx + issue.textMatch.length), type: 'normal' });
+          }
+        }
+      });
+      parts = next;
+    });
+
+    return parts.map((part, idx) => {
+      if (part.type === 'normal') return <span key={idx}>{part.text}</span>;
+      const style = part.type === 'critical' ? 'bg-red-500/20 text-red-300 px-1 rounded' : 'bg-amber-500/20 text-amber-200 px-1 rounded';
+      return <span key={idx} className={style}>{part.text}</span>;
+    });
+  };
+
+  return (
+    <div className="h-screen flex flex-col animate-in slide-in-from-bottom-4">
+      <div className={`h-16 border-b flex items-center justify-between px-6 ${isDark ? 'border-white/5 bg-[#0B0C10]' : 'border-black/5 bg-white'}`}>
+        <div className="flex items-center gap-4">
+          <h2 className={`font-serif text-lg ${desktopStyles.textMain(isDark)}`}>{name}</h2>
+          <span className="px-2 py-0.5 rounded text-[10px] bg-gray-500/20 text-gray-500 font-bold uppercase">Только чтение</span>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${
+              isDark ? 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20' : 'bg-amber-50 text-amber-600'
+            }`}
+          >
+            <AlertTriangle size={14} /> {issues.length} рисков
+          </button>
+          <div className={`h-6 w-[1px] ${isDark ? 'bg-white/10' : 'bg-black/10'}`} />
+          <button className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider ${isDark ? 'bg-white text-black' : 'bg-black text-white'}`}>
+            Экспорт отчёта
+          </button>
+          <button onClick={onEdit} className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider border ${isDark ? 'border-white/10 text-white hover:bg-white/10' : 'border-black/10 text-black hover:bg-black/5'}`}>
+            Редактировать
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 flex overflow-hidden">
+        <div className={`flex-1 overflow-y-auto p-12 flex justify-center ${isDark ? 'bg-[#121212]' : 'bg-[#F2F0E9]'}`}>
+          <div className={`w-[800px] min-h-[1000px] shadow-2xl p-16 relative ${isDark ? 'bg-[#1E1E1E] text-gray-300' : 'bg-white text-gray-800'}`}>
+            <div className="mb-12 flex justify-between">
+              <div className="w-32 h-8 bg-current opacity-10 rounded" />
+              <div className="w-24 h-4 bg-current opacity-10 rounded" />
+            </div>
+            <div className="space-y-6 text-justify opacity-80 font-serif leading-loose text-sm">
+              {preview.map((paragraph, idx) => (
+                <p key={idx} className={issues.length ? 'relative' : ''}>
+                  {renderPreview(paragraph)}
+                  {idx === 1 && issues.length > 0 && (
+                    <span className="absolute -right-32 top-0 text-amber-500 text-xs font-sans font-bold flex items-center gap-1">
+                      <ChevronLeft size={12} /> Обнаружены риски
+                    </span>
+                  )}
+                </p>
+              ))}
+            </div>
           </div>
-          <div className="space-y-6 text-justify opacity-80 font-serif leading-loose text-sm">
-            <p>ДАННЫЙ ДОГОВОР заключён 14 декабря 2025 года...</p>
-            <p>1. ОПРЕДЕЛЕНИЯ. «Конфиденциальная информация» означает сведения, раскрытые Стороной...</p>
-            <p className="bg-amber-500/20 -mx-2 px-2 py-1 rounded border-l-2 border-amber-500 relative group">
-              2. ОТВЕТСТВЕННОСТЬ. Получающая сторона обязана возмещать все убытки без ограничений...
-              <span className="absolute -right-32 top-0 text-amber-500 text-xs font-sans font-bold flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <ChevronLeft size={12} /> Высокий риск
-              </span>
-            </p>
-            <p>3. СРОК. Соглашение действует в течение пяти (5) лет...</p>
-            {[1, 2, 3, 4, 5].map((i) => (
-              <div key={i} className="space-y-3">
-                <div className="w-full h-3 bg-current opacity-10 rounded" />
-                <div className="w-[90%] h-3 bg-current opacity-10 rounded" />
-                <div className="w-[95%] h-3 bg-current opacity-10 rounded" />
+        </div>
+
+        <div className={`w-[400px] border-l flex flex-col ${isDark ? 'bg-[#0B0C10] border-white/5' : 'bg-white border-black/5'}`}>
+          <div className="p-6 border-b border-white/5">
+            <h3 className={`font-serif text-xl mb-1 ${desktopStyles.textMain(isDark)}`}>AI-анализ</h3>
+            <p className={`text-xs ${desktopStyles.textSec(isDark)}`}>Модель Juris-LLM v4</p>
+          </div>
+
+          <div className="flex-1 overflow-y-auto p-6 space-y-6">
+            {issues.length === 0 && (
+              <div className={`p-5 rounded-xl border-l-2 border-emerald-500 ${isDark ? 'bg-[#151515]' : 'bg-emerald-50/60'}`}>
+                <div className="flex items-center gap-2 mb-3">
+                  <CheckCircle2 size={16} className="text-emerald-500" />
+                  <span className={`text-sm font-bold ${desktopStyles.textMain(isDark)}`}>Риски не найдены</span>
+                </div>
+                <p className={`text-sm leading-relaxed ${desktopStyles.textSec(isDark)}`}>
+                  Документ выглядит чистым. Можно перейти к подписанию или внести правки вручную.
+                </p>
+              </div>
+            )}
+
+            {issues.map((issue) => (
+              <div
+                key={issue.id}
+                className={`p-5 rounded-xl border-l-2 ${
+                  issue.type === 'critical'
+                    ? 'border-red-500 ' + (isDark ? 'bg-[#151515]' : 'bg-red-50/60')
+                    : 'border-amber-500 ' + (isDark ? 'bg-[#151515]' : 'bg-amber-50/60')
+                }`}
+              >
+                <div className="flex items-center gap-2 mb-3">
+                  {issue.type === 'critical' ? <AlertTriangle size={16} className="text-amber-500" /> : <CheckCircle2 size={16} className="text-emerald-500" />}
+                  <span className={`text-sm font-bold ${desktopStyles.textMain(isDark)}`}>{issue.title}</span>
+                </div>
+                <p className={`text-sm mb-4 leading-relaxed ${desktopStyles.textSec(isDark)}`}>{issue.description}</p>
+                <div className="space-y-2">
+                  <button
+                    className={`w-full py-2 rounded-lg text-xs font-bold border transition-colors ${
+                      isDark ? 'border-white/10 hover:bg-white/5 text-white' : 'border-black/10 hover:bg-black/5 text-black'
+                    }`}
+                    onClick={onEdit}
+                  >
+                    Заменить на: {issue.suggestion}
+                  </button>
+                  <button className={`w-full py-2 rounded-lg text-xs font-bold transition-colors ${isDark ? 'text-gray-500 hover:text-white' : 'text-gray-400 hover:text-black'}`}>
+                    Игнорировать
+                  </button>
+                </div>
               </div>
             ))}
           </div>
-        </div>
-      </div>
 
-      <div className={`w-[400px] border-l flex flex-col ${isDark ? 'bg-[#0B0C10] border-white/5' : 'bg-white border-black/5'}`}>
-        <div className="p-6 border-b border-white/5">
-          <h3 className={`font-serif text-xl mb-1 ${desktopStyles.textMain(isDark)}`}>AI-анализ</h3>
-          <p className={`text-xs ${desktopStyles.textSec(isDark)}`}>Модель Juris-LLM v4</p>
-        </div>
-
-        <div className="flex-1 overflow-y-auto p-6 space-y-6">
-          <div className={`p-5 rounded-xl border-l-2 border-amber-500 ${isDark ? 'bg-[#151515]' : 'bg-amber-50/50'}`}>
-            <div className="flex items-center gap-2 mb-3">
-              <AlertTriangle size={16} className="text-amber-500" />
-              <span className={`text-sm font-bold ${desktopStyles.textMain(isDark)}`}>Неограниченная ответственность</span>
+          <div className={`p-4 border-t ${isDark ? 'border-white/5' : 'border-black/5'}`}>
+            <div className={`flex items-center gap-3 p-3 rounded-xl ${isDark ? 'bg-white/5' : 'bg-black/5'}`}>
+              <Sparkles size={18} className="text-amber-500" />
+              <input type="text" placeholder="Спросите об этом договоре..." className="bg-transparent border-none outline-none text-sm w-full font-light" />
             </div>
-            <p className={`text-sm mb-4 leading-relaxed ${desktopStyles.textSec(isDark)}`}>
-              Пункт 2.1 содержит неограниченное возмещение. Рекомендуем установить потолок в 2x стоимости договора.
-            </p>
-            <div className="space-y-2">
-              <button className={`w-full py-2 rounded-lg text-xs font-bold border transition-colors ${isDark ? 'border-white/10 hover:bg-white/5 text-white' : 'border-black/10 hover:bg-black/5 text-black'}`}>
-                Подготовить поправку
-              </button>
-              <button className={`w-full py-2 rounded-lg text-xs font-bold transition-colors ${isDark ? 'text-gray-500 hover:text-white' : 'text-gray-400 hover:text-black'}`}>
-                Игнорировать
-              </button>
-            </div>
-          </div>
-
-          <div className={`p-5 rounded-xl border-l-2 border-emerald-500 ${isDark ? 'bg-[#151515]' : 'bg-gray-50'}`}>
-            <div className="flex items-center gap-2 mb-3">
-              <CheckCircle2 size={16} className="text-emerald-500" />
-              <span className={`text-sm font-bold ${desktopStyles.textMain(isDark)}`}>Проверка юрисдикции</span>
-            </div>
-            <p className={`text-sm leading-relaxed ${desktopStyles.textSec(isDark)}`}>
-              Применимое право — Нью-Йорк. Соответствует прошлым сделкам с этим контрагентом.
-            </p>
-          </div>
-        </div>
-
-        <div className={`p-4 border-t ${isDark ? 'border-white/5' : 'border-black/5'}`}>
-          <div className={`flex items-center gap-3 p-3 rounded-xl ${isDark ? 'bg-white/5' : 'bg-black/5'}`}>
-            <Sparkles size={18} className="text-amber-500" />
-            <input type="text" placeholder="Спросите об этом договоре..." className="bg-transparent border-none outline-none text-sm w-full font-light" />
           </div>
         </div>
       </div>
     </div>
-  </div>
-);
+  );
+};
 
 const DesktopExperience = ({ onSwitch }) => {
   const [isDark, setIsDark] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [collapsed, setCollapsed] = useState(false);
+  const [showUpload, setShowUpload] = useState(false);
+  const [showEditor, setShowEditor] = useState(false);
+  const [documentData, setDocumentData] = useState({
+    text: INITIAL_TEXT,
+    issues: INITIAL_ISSUES,
+    name: 'NDA_Draft_ru.txt',
+  });
+
+  const handleUploadComplete = (data) => {
+    setDocumentData(data);
+    setShowUpload(false);
+    setActiveTab('analysis');
+    setShowEditor(true);
+  };
+
+  const handleSaveEditor = ({ issuesCount, text, issues }) => {
+    setDocumentData((prev) => ({ ...prev, text, issues }));
+    setShowEditor(false);
+  };
 
   return (
     <div className={`flex h-screen w-full font-sans transition-colors duration-500 ${desktopStyles.bg(isDark)}`}>
+      {showUpload && (
+        <UploadScreen
+          isDark={isDark}
+          onCancel={() => setShowUpload(false)}
+          onUploadComplete={handleUploadComplete}
+        />
+      )}
+
+      {showEditor && (
+        <DocumentWorkspace
+          isDark={isDark}
+          onBack={() => setShowEditor(false)}
+          onSave={handleSaveEditor}
+          initialText={documentData.text}
+          initialIssues={documentData.issues}
+          fileName={documentData.name}
+        />
+      )}
       <aside
         className={`flex flex-col h-full transition-all duration-300 z-50 ${collapsed ? 'w-20' : 'w-[280px]'} ${desktopStyles.sidebar(isDark)}`}
       >
@@ -878,8 +1082,14 @@ const DesktopExperience = ({ onSwitch }) => {
         <div className="fixed inset-0 pointer-events-none">
           <div className={`absolute top-0 right-0 w-[50%] h-[50%] rounded-full blur-[150px] opacity-[0.03] ${isDark ? 'bg-white' : 'bg-black'}`} />
         </div>
-        {activeTab === 'dashboard' && <DashboardView isDark={isDark} onStartAnalysis={() => setActiveTab('analysis')} />}
-        {activeTab === 'analysis' && <DocumentAnalysisView isDark={isDark} />}
+        {activeTab === 'dashboard' && <DashboardView isDark={isDark} onStartUpload={() => setShowUpload(true)} />}
+        {activeTab === 'analysis' && (
+          <DocumentAnalysisView
+            isDark={isDark}
+            documentData={documentData}
+            onEdit={() => setShowEditor(true)}
+          />
+        )}
       </main>
     </div>
   );
