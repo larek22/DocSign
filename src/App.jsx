@@ -1,394 +1,418 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   Scale,
-  ShieldCheck,
-  FileSignature,
+  FileText,
   Clock,
   Search,
-  Bell,
   ChevronRight,
   ChevronLeft,
   Menu,
   X,
-  Fingerprint,
   Zap,
-  MoreVertical,
-  ArrowUpRight,
-  Bookmark,
-  Sparkles,
-  AlertOctagon,
-  Check,
-  Play,
+  MoreHorizontal,
+  LayoutDashboard,
+  FolderOpen,
+  Settings,
+  PieChart,
+  CheckCircle2,
+  AlertTriangle,
 } from 'lucide-react';
 
-// --- ТЕМА ---
-
-const useTheme = () => {
-  const [isDark, setIsDark] = useState(true);
-  const toggle = () => setIsDark((prev) => !prev);
-  return { isDark, toggle };
-};
-
-// Палитра "Old Money"
+// --- THEME ENGINE ---
+// Тот же движок, адаптированный под большие площади
 const styles = {
-  bg: (dark) => (dark ? 'bg-[#050505]' : 'bg-[#F2F0E9]'),
+  bg: (dark) => (dark ? 'bg-[#080808]' : 'bg-[#F5F2EB]'),
+  sidebar: (dark) =>
+    dark ? 'bg-[#0B0C10] border-r border-white/5' : 'bg-[#FDFBF7] border-r border-[#E5E0D6]',
   textMain: (dark) => (dark ? 'text-[#EAEAEA]' : 'text-[#1A1A1A]'),
   textSec: (dark) => (dark ? 'text-[#888888]' : 'text-[#666660]'),
   glass: (dark) =>
-    dark
-      ? 'bg-[#1A1A1A]/60 backdrop-blur-xl border border-white/5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]'
-      : 'bg-[#FFFFFF]/70 backdrop-blur-xl border border-black/5 shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05)]',
-  goldText: 'text-[#C5A059]',
-  goldBg: 'bg-[#C5A059]',
+    dark ? 'bg-[#1A1A1A]/40 backdrop-blur-md border border-white/5' : 'bg-[#FFFFFF]/60 backdrop-blur-md border border-black/5',
   card: (dark) =>
-    dark
-      ? 'bg-[#121212] border border-white/5 shadow-2xl shadow-black/50'
-      : 'bg-white border border-[#E5E0D6] shadow-[0_2px_24px_-6px_rgba(0,0,0,0.04)]',
+    dark ? 'bg-[#121212] border border-white/5 hover:border-white/10' : 'bg-white border border-[#E5E0D6] hover:border-[#D4AF37]/30',
+  goldText: 'text-[#C5A059]',
+  accentGradient: 'bg-gradient-to-br from-[#C5A059] to-[#8A6E36]',
 };
 
-// --- КОМПОНЕНТЫ ---
+// --- UI COMPONENTS ---
 
-const SerifHeader = ({ children, className = '', dark }) => (
-  <h2 className={`font-serif tracking-tight ${className} ${dark ? 'text-white' : 'text-black'}`}>
-    {children}
-  </h2>
-);
-
-const IconButton = ({ icon: Icon, onClick, isDark, label }) => (
+const SidebarItem = ({ icon: Icon, label, active, collapsed, isDark, onClick }) => (
   <button
     onClick={onClick}
-    className={`p-3 rounded-full transition-all duration-300 group ${
-      isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-black'
-    }`}
-    aria-label={label}
+    className={`
+      w-full flex items-center gap-4 p-3 mb-2 rounded-xl transition-all duration-300 group
+      ${
+        active
+          ? isDark
+            ? 'bg-white/10 text-white'
+            : 'bg-[#1A1A1A] text-white'
+          : isDark
+            ? 'text-gray-500 hover:text-white hover:bg-white/5'
+            : 'text-gray-500 hover:text-black hover:bg-black/5'
+      }
+    `}
   >
-    <Icon strokeWidth={1.5} size={22} className="opacity-70 group-hover:opacity-100 transition-opacity" />
+    <Icon size={20} strokeWidth={1.5} className={active ? 'text-[#C5A059]' : ''} />
+    {!collapsed && (
+      <span className={`text-sm font-medium tracking-wide ${collapsed ? 'opacity-0' : 'opacity-100'}`}>{label}</span>
+    )}
+    {active && !collapsed && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-[#C5A059] shadow-[0_0_8px_#C5A059]" />}
   </button>
 );
 
-const PremiumCard = ({ children, className, isDark, onClick }) => (
-  <div
-    onClick={onClick}
-    className={`
-      relative overflow-hidden rounded-[20px] p-6 transition-all duration-500 ease-out
-      hover:scale-[1.01] cursor-pointer group
-      ${styles.card(isDark)} ${className}
-    `}
-  >
-    {children}
+const StatCard = ({ title, value, sub, icon: Icon, isDark }) => (
+  <div className={`p-6 rounded-[20px] ${styles.card(isDark)} transition-all duration-300 hover:transform hover:-translate-y-1`}>
+    <div className="flex justify-between items-start mb-4">
+      <div className={`p-3 rounded-full ${isDark ? 'bg-white/5' : 'bg-black/5'}`}>
+        <Icon size={20} className={styles.goldText} />
+      </div>
+      <span className={`text-xs font-bold tracking-wider uppercase ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{sub}</span>
+    </div>
+    <h3 className={`text-3xl font-serif mb-1 ${styles.textMain(isDark)}`}>{value}</h3>
+    <p className={`text-xs uppercase tracking-widest ${styles.textSec(isDark)}`}>{title}</p>
   </div>
 );
 
-// --- ЭКРАНЫ ---
-
-const Dashboard = ({ isDark, onNavigate }) => (
-  <div className="pt-24 px-6 pb-32 animate-in fade-in duration-700">
-    <div className="mb-8">
-      <p className={`text-xs font-bold tracking-[0.2em] uppercase mb-2 ${styles.goldText}`}>
-        Среда, 12 окт
-      </p>
-      <SerifHeader dark={isDark} className="text-4xl">
-        Доброе утро,<br />Советник.
-      </SerifHeader>
-    </div>
-
-    <div
-      onClick={() => onNavigate('scan')}
-      className="relative w-full aspect-[16/9] rounded-[24px] overflow-hidden cursor-pointer group shadow-2xl shadow-black/20"
-    >
-      <div className="absolute inset-0 bg-[#0F1115]">
-        <div className="absolute top-0 right-0 w-[300px] h-[300px] bg-[#1a237e] opacity-20 blur-[100px] rounded-full group-hover:opacity-30 transition-opacity duration-700"></div>
-        <div className="absolute bottom-0 left-0 w-[200px] h-[200px] bg-[#C5A059] opacity-10 blur-[80px] rounded-full"></div>
-      </div>
-
-      <div className="absolute inset-0 p-8 flex flex-col justify-between z-10">
-        <div className="flex justify-between items-start">
-          <div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center bg-white/5 backdrop-blur-md">
-            <Scale className="text-white" size={20} strokeWidth={1.5} />
-          </div>
-          <span className="px-3 py-1 rounded-full border border-white/10 bg-black/20 backdrop-blur-md text-[10px] font-bold text-white tracking-widest uppercase">
-            AI Анализ 2.0
-          </span>
-        </div>
-
-        <div>
-          <h3 className="text-2xl font-serif text-white mb-2">Новый скан контракта</h3>
-          <p className="text-white/50 text-sm font-light max-w-[80%]">Загрузите PDF или DOCX, чтобы найти риски и несоответствия.</p>
-        </div>
-
-        <div className="absolute right-6 bottom-6 opacity-0 group-hover:opacity-100 transition-opacity duration-500 transform translate-x-2 group-hover:translate-x-0">
-          <ArrowUpRight className="text-white" />
-        </div>
-      </div>
-    </div>
-
-    <div className="mt-12">
-      <div className="flex justify-between items-end mb-6 border-b border-gray-500/10 pb-2">
-        <h3 className={`font-serif text-xl ${styles.textMain(isDark)}`}>Недавние дела</h3>
-        <button className={`text-xs tracking-widest uppercase font-bold hover:opacity-70 transition-opacity ${styles.textSec(isDark)}`}>
-          Архив
-        </button>
-      </div>
-
-      <div className="space-y-4">
-        {[
-          { title: 'Слияние: TechCorp', date: '2 часа назад', status: 'Требует внимания', icon: AlertOctagon, color: 'text-amber-500' },
-          { title: 'Передача IP прав', date: 'Вчера', status: 'Ок', icon: Check, color: 'text-emerald-500' },
-          { title: 'Трудовой контракт #402', date: '10 окт', status: 'Черновик', icon: FileSignature, color: 'text-gray-400' },
-        ].map((item, i) => (
-          <PremiumCard key={i} isDark={isDark} className="!p-5 flex items-center gap-5">
-            <div className={`p-3 rounded-full ${isDark ? 'bg-white/5' : 'bg-black/5'}`}>
-              <item.icon className={item.color} size={20} strokeWidth={1.5} />
-            </div>
-            <div className="flex-1">
-              <h4 className={`font-medium text-sm mb-1 ${styles.textMain(isDark)}`}>{item.title}</h4>
-              <p className={`text-xs ${styles.textSec(isDark)}`}>
-                {item.date} • {item.status}
-              </p>
-            </div>
-            <ChevronRight size={16} className={`opacity-30 ${styles.textMain(isDark)}`} />
-          </PremiumCard>
-        ))}
-      </div>
-    </div>
-  </div>
-);
-
-const ScanView = ({ isDark, onBack }) => {
-  const [scanning, setScanning] = useState(false);
-  const [result, setResult] = useState(false);
-
-  useEffect(() => {
-    if (scanning) {
-      const timer = setTimeout(() => {
-        setScanning(false);
-        setResult(true);
-      }, 2500);
-      return () => clearTimeout(timer);
-    }
-    return undefined;
-  }, [scanning]);
-
-  if (result) {
-    return (
-      <div className="h-full pt-24 px-6 animate-in slide-in-from-bottom-8 duration-700">
-        <div className="flex justify-between items-center mb-8">
-          <button
-            onClick={onBack}
-            className={`flex items-center gap-2 text-sm font-bold tracking-widest uppercase opacity-60 hover:opacity-100 ${styles.textMain(isDark)}`}
-          >
-            <ChevronLeft size={16} /> Назад
-          </button>
-          <div className="flex gap-2">
-            <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
-            <span className="text-xs font-bold text-amber-500 uppercase tracking-widest">Найдено 2 проблемы</span>
-          </div>
-        </div>
-
-        <div className={`rounded-t-[32px] min-h-screen p-8 shadow-[0_-10px_40px_-10px_rgba(0,0,0,0.1)] ${isDark ? 'bg-[#151515]' : 'bg-white'}`}>
-          <div className="w-full flex justify-center mb-8">
-            <div className="w-12 h-1.5 rounded-full bg-gray-500/20"></div>
-          </div>
-
-          <h2 className={`font-serif text-3xl mb-2 ${styles.textMain(isDark)}`}>Отчет анализа</h2>
-          <p className={`text-sm mb-10 ${styles.textSec(isDark)}`}>
-            Документ: <span className="underline decoration-1 underline-offset-4">NDA_Draft_v0.4.pdf</span>
-          </p>
-
-          <div className="relative pl-6 border-l-2 border-amber-500/50 mb-10 group cursor-pointer">
-            <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-full border-4 ${isDark ? 'bg-[#151515] border-amber-500' : 'bg-white border-amber-500'}`}></div>
-
-            <h3 className={`text-lg font-serif mb-2 ${styles.textMain(isDark)} group-hover:text-amber-500 transition-colors`}>
-              Статья об индемнификации
-            </h3>
-            <p className={`text-sm leading-relaxed ${styles.textSec(isDark)}`}>
-              Текущее формулировка перекладывает <span className="text-amber-500 font-medium">неограниченную ответственность</span> на раскрывающую сторону. Это отклонение от практики (потолок 2x гонорара).
-            </p>
-
-            <div className={`mt-4 p-4 rounded-xl text-sm italic font-serif ${isDark ? 'bg-amber-500/10 text-amber-200' : 'bg-amber-50 text-amber-800'}`}>
-              «Рекомендация: ограничить ответственность суммой контракта».
-            </div>
-          </div>
-
-          <div className="relative pl-6 border-l-2 border-emerald-500/20 mb-8 opacity-60 hover:opacity-100 transition-opacity">
-            <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-full border-4 ${isDark ? 'bg-[#151515] border-emerald-500' : 'bg-white border-emerald-500'}`}></div>
-            <h3 className={`text-lg font-serif mb-2 ${styles.textMain(isDark)}`}>Период конфиденциальности</h3>
-            <p className={`text-sm leading-relaxed ${styles.textSec(isDark)}`}>Срок 5 лет. Соответствует стандарту.</p>
-          </div>
-
-          <button
-            className={`w-full py-4 mt-4 rounded-xl font-bold text-xs tracking-[0.2em] uppercase transition-all hover:scale-[1.02] ${
-              isDark ? 'bg-white text-black hover:bg-gray-200' : 'bg-black text-white hover:bg-gray-800'
-            }`}
-          >
-            Сгенерировать дополнение
-          </button>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="h-full flex flex-col items-center justify-center p-6 relative overflow-hidden">
-      <div
-        className={`relative w-64 h-[360px] rounded-[4px] border transition-all duration-700 ${
-          scanning ? 'border-transparent scale-105' : 'border-gray-500/30'
-        } flex items-center justify-center overflow-hidden`}
-      >
-        <div
-          className={`absolute inset-0 p-8 space-y-4 transition-opacity duration-500 ${
-            scanning ? 'opacity-40' : 'opacity-100'
-          } ${isDark ? 'bg-[#121212]' : 'bg-white'}`}
-        >
-          <div className="w-1/3 h-2 bg-gray-500/20 mb-8"></div>
-          {[1, 2, 3, 4, 5, 6, 7].map((i) => (
-            <div key={i} className="w-full h-1.5 bg-gray-500/10 rounded-full"></div>
-          ))}
-          <div className="w-2/3 h-1.5 bg-gray-500/10 rounded-full"></div>
-        </div>
-
-        {scanning && (
-          <div className="absolute inset-0 z-20 animate-scan">
-            <div className="h-full w-full bg-gradient-to-b from-transparent via-amber-500/20 to-transparent translate-y-[-100%] animate-scan-beam"></div>
-            <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.8)]"></div>
-          </div>
-        )}
-
-        {!scanning && (
-          <div
-            onClick={() => setScanning(true)}
-            className="absolute inset-0 z-30 flex items-center justify-center cursor-pointer group bg-black/5 hover:bg-black/10 transition-colors"
-          >
-            <div
-              className={`w-20 h-20 rounded-full flex items-center justify-center backdrop-blur-md transition-transform group-hover:scale-110 ${
-                isDark ? 'bg-white/10 text-white' : 'bg-black/80 text-white'
-              }`}
-            >
-              <Search size={24} strokeWidth={1.5} />
-            </div>
-          </div>
-        )}
-      </div>
-
-      <div className="mt-12 text-center space-y-2">
-        <h2 className={`font-serif text-2xl ${styles.textMain(isDark)}`}>
-          {scanning ? 'Анализ прецедентов…' : 'Загрузите документ'}
-        </h2>
-        <p className={`text-sm font-light ${styles.textSec(isDark)}`}>ИИ сверит с Гражданским кодексом</p>
-      </div>
-    </div>
-  );
-};
-
-// --- НАВИГАЦИЯ ---
-
-const LuxuryNav = ({ isDark }) => (
-  <div className="fixed bottom-0 left-0 right-0 p-6 z-50 pointer-events-none">
-    <div
-      className={`mx-auto max-w-[280px] h-[64px] rounded-full px-2 flex justify-between items-center pointer-events-auto ${styles.glass(isDark)}`}
-    >
-      {[
-        { icon: Scale, active: true },
-        { icon: Search, active: false },
-        { icon: Bookmark, active: false },
-        { icon: Fingerprint, active: false },
-      ].map((item, idx) => (
-        <button
-          key={idx}
-          className={`
-            w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300
-            ${
-              item.active
-                ? isDark
-                  ? 'bg-white text-black shadow-[0_0_15px_rgba(255,255,255,0.2)]'
-                  : 'bg-black text-white shadow-lg'
-                : isDark
-                  ? 'text-white/40 hover:bg-white/10 hover:text-white'
-                  : 'text-black/40 hover:bg-black/5 hover:text-black'
-            }
-          `}
-        >
-          <item.icon size={20} strokeWidth={1.5} />
-        </button>
-      ))}
-    </div>
-  </div>
-);
-
-// --- ШАПКА ---
-
-const Header = ({ isDark, toggle, forceMobile, setForceMobile }) => (
-  <header className={`fixed top-0 left-0 right-0 z-50 px-6 py-6 transition-colors duration-500`}>
-    <div className="flex justify-between items-center gap-3">
+const TableRow = ({ client, caseName, status, date, isDark }) => (
+  <tr className={`group border-b transition-colors ${isDark ? 'border-white/5 hover:bg-white/[0.02]' : 'border-black/5 hover:bg-black/[0.02]'}`}>
+    <td className="py-4 pl-4">
       <div className="flex items-center gap-3">
-        <div className={`w-10 h-10 rounded-full flex items-center justify-center border ${isDark ? 'border-white/20 bg-white/5' : 'border-black/10 bg-white/50'}`}>
-          <span className={`font-serif font-bold text-xl ${styles.textMain(isDark)}`}>J.</span>
+        <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-serif ${isDark ? 'bg-white/10' : 'bg-black/10'}`}>
+          {client.charAt(0)}
         </div>
-        <div className="hidden sm:block">
-          <p className={`text-xs uppercase tracking-[0.25em] ${styles.textSec(isDark)}`}>DocSign</p>
-          <p className={`font-semibold ${styles.textMain(isDark)}`}>Elite Jurist</p>
-        </div>
+        <span className={`font-medium ${styles.textMain(isDark)}`}>{client}</span>
       </div>
+    </td>
+    <td className={`py-4 ${styles.textSec(isDark)}`}>{caseName}</td>
+    <td className="py-4">
+      <span
+        className={`
+        px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border
+        ${status === 'Active' ? 'border-emerald-500/30 text-emerald-500 bg-emerald-500/10' : ''}
+        ${status === 'Review' ? 'border-amber-500/30 text-amber-500 bg-amber-500/10' : ''}
+        ${status === 'Draft' ? 'border-gray-500/30 text-gray-500 bg-gray-500/10' : ''}
+      `}
+      >
+        {status}
+      </span>
+    </td>
+    <td className={`py-4 text-sm ${styles.textSec(isDark)}`}>{date}</td>
+    <td className="py-4 pr-4 text-right">
+      <button className={`opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-full ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>
+        <MoreHorizontal size={16} />
+      </button>
+    </td>
+  </tr>
+);
 
-      <div className="flex items-center gap-2">
+// --- MAIN SCREENS ---
+
+const DashboardView = ({ isDark }) => (
+  <div className="p-8 max-w-[1600px] mx-auto animate-in fade-in duration-700">
+    {/* Header Section */}
+    <div className="flex justify-between items-end mb-10">
+      <div>
+        <p className={`text-xs font-bold tracking-[0.2em] uppercase mb-2 ${styles.goldText}`}>Sunday, 14 Dec • Rome</p>
+        <h1 className={`text-4xl font-serif ${styles.textMain(isDark)}`}>Overview</h1>
+      </div>
+      <div className="flex gap-4">
         <button
-          onClick={() => setForceMobile((prev) => !prev)}
-          className={`hidden sm:inline-flex px-3 py-2 rounded-lg border text-xs tracking-widest uppercase ${
-            isDark ? 'border-white/15 text-white' : 'border-black/15 text-black'
+          className={`px-6 py-3 rounded-full text-sm font-bold tracking-widest uppercase transition-all ${
+            isDark ? 'bg-white text-black hover:bg-gray-200' : 'bg-[#1A1A1A] text-white hover:bg-gray-800'
           }`}
         >
-          {forceMobile ? 'Десктоп' : 'Мобильная версия'}
+          + New Matter
         </button>
-        <IconButton icon={Zap} isDark={isDark} onClick={toggle} label="Сменить тему" />
-        <IconButton icon={Menu} isDark={isDark} onClick={() => setForceMobile((prev) => !prev)} label="Меню" />
       </div>
     </div>
-  </header>
-);
 
-// --- ЛОГИКА ---
+    {/* Top Grid: Hero Action & Stats */}
+    <div className="grid grid-cols-12 gap-6 mb-10">
+      {/* Hero Banner */}
+      <div className="col-span-12 lg:col-span-8 relative overflow-hidden rounded-[24px] group cursor-pointer shadow-2xl">
+        <div className="absolute inset-0 bg-[#0F1115]">
+          <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-[#1a237e] opacity-20 blur-[120px] rounded-full"></div>
+          <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-[#C5A059] opacity-10 blur-[100px] rounded-full"></div>
+        </div>
 
-export default function EliteJuristApp() {
-  const { isDark, toggle } = useTheme();
-  const [view, setView] = useState('dashboard');
-  const [forceMobile, setForceMobile] = useState(false);
+        <div className="relative z-10 p-10 h-full flex flex-col justify-between min-h-[300px]">
+          <div className="flex justify-between items-start">
+            <div className="w-14 h-14 rounded-full border border-white/10 flex items-center justify-center bg-white/5 backdrop-blur-md">
+              <Scale className="text-white" size={24} />
+            </div>
+            <div className="bg-white/10 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/5">
+              <span className="text-xs font-bold text-white tracking-widest uppercase">AI Engine v2.4 Active</span>
+            </div>
+          </div>
 
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
-  }, [isDark]);
-
-  const mainWidth = forceMobile ? 'max-w-md' : 'max-w-5xl';
-  const mainHeight = forceMobile ? 'h-screen overflow-y-auto no-scrollbar' : '';
-
-  return (
-    <div className={`relative min-h-screen font-sans transition-colors duration-700 ${styles.bg(isDark)}`}>
-      <div className="fixed inset-0 pointer-events-none overflow-hidden">
-        <div className={`absolute -top-[20%] -left-[10%] w-[70%] h-[70%] rounded-full blur-[120px] opacity-[0.06] ${isDark ? 'bg-white' : 'bg-black'}`}></div>
+          <div className="max-w-xl">
+            <h2 className="text-3xl font-serif text-white mb-4">Contract Intelligence</h2>
+            <p className="text-white/60 mb-8 font-light text-lg">
+              Drag and drop your PDF here to initiate a deep scan for liability clauses, compliance risks, and non-standard deviations.
+            </p>
+            <div className="flex items-center gap-4 text-sm font-bold text-[#C5A059] uppercase tracking-widest group-hover:translate-x-2 transition-transform">
+              Start Analysis <ChevronRight size={16} />
+            </div>
+          </div>
+        </div>
       </div>
 
-      <Header isDark={isDark} toggle={toggle} forceMobile={forceMobile} setForceMobile={setForceMobile} />
+      {/* Stats Column */}
+      <div className="col-span-12 lg:col-span-4 flex flex-col gap-6">
+        <StatCard title="Active Cases" value="24" sub="+12%" icon={FolderOpen} isDark={isDark} />
+        <StatCard title="Hours Billed" value="142.5" sub="+12%" icon={Clock} isDark={isDark} />
+      </div>
+    </div>
 
-      <main className={`relative ${mainWidth} mx-auto ${mainHeight} pt-2 pb-16 sm:pb-24`}>
-        {view === 'dashboard' && <Dashboard isDark={isDark} onNavigate={setView} />}
-        {view === 'scan' && <ScanView isDark={isDark} onBack={() => setView('dashboard')} />}
+    {/* Recent Matters Table */}
+    <div className={`rounded-[24px] p-8 ${styles.card(isDark)}`}>
+      <div className="flex justify-between items-center mb-6">
+        <h3 className={`text-xl font-serif ${styles.textMain(isDark)}`}>Recent Matters</h3>
+        <div className="flex gap-2">
+          <button className={`p-2 rounded-lg ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>
+            <Search size={18} className={styles.textSec(isDark)} />
+          </button>
+          <button className={`p-2 rounded-lg ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>
+            <MoreHorizontal size={18} className={styles.textSec(isDark)} />
+          </button>
+        </div>
+      </div>
+
+      <table className="w-full text-left border-collapse">
+        <thead>
+          <tr className={`text-xs uppercase tracking-widest border-b ${isDark ? 'text-gray-500 border-white/5' : 'text-gray-400 border-black/5'}`}>
+            <th className="pb-4 pl-4 font-normal">Client</th>
+            <th className="pb-4 font-normal">Matter</th>
+            <th className="pb-4 font-normal">Status</th>
+            <th className="pb-4 font-normal">Last Updated</th>
+            <th className="pb-4 font-normal text-right">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <TableRow client="TechCorp Inc." caseName="Merger Agreement v2" status="Review" date="2h ago" isDark={isDark} />
+          <TableRow client="Sterling Art" caseName="IP Rights Transfer" status="Active" date="Yesterday" isDark={isDark} />
+          <TableRow client="Nexus Logistics" caseName="Employment Dispute" status="Draft" date="Oct 10" isDark={isDark} />
+          <TableRow client="Private Estate" caseName="Trust Formation" status="Active" date="Oct 08" isDark={isDark} />
+        </tbody>
+      </table>
+    </div>
+  </div>
+);
+
+const DocumentAnalysisView = ({ isDark }) => (
+  <div className="h-screen flex flex-col animate-in slide-in-from-bottom-4">
+    {/* Toolbar */}
+    <div className={`h-16 border-b flex items-center justify-between px-6 ${isDark ? 'border-white/5 bg-[#0B0C10]' : 'border-black/5 bg-white'}`}>
+      <div className="flex items-center gap-4">
+        <h2 className={`font-serif text-lg ${styles.textMain(isDark)}`}>NDA_Draft_v0.4.pdf</h2>
+        <span className="px-2 py-0.5 rounded text-[10px] bg-gray-500/20 text-gray-500 font-bold uppercase">Read Only</span>
+      </div>
+      <div className="flex items-center gap-3">
+        <button
+          className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${
+            isDark ? 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20' : 'bg-amber-50 text-amber-600'
+          }`}
+        >
+          <AlertTriangle size={14} /> 2 Risks Found
+        </button>
+        <div className={`h-6 w-[1px] ${isDark ? 'bg-white/10' : 'bg-black/10'}`}></div>
+        <button
+          className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider ${isDark ? 'bg-white text-black' : 'bg-black text-white'}`}
+        >
+          Export Report
+        </button>
+      </div>
+    </div>
+
+    {/* Split View */}
+    <div className="flex-1 flex overflow-hidden">
+      {/* Left: Document Preview (Mock) */}
+      <div className={`flex-1 overflow-y-auto p-12 flex justify-center ${isDark ? 'bg-[#121212]' : 'bg-[#F2F0E9]'}`}>
+        <div className={`w-[800px] min-h-[1000px] shadow-2xl p-16 relative ${isDark ? 'bg-[#1E1E1E] text-gray-300' : 'bg-white text-gray-800'}`}>
+          <div className="mb-12 flex justify-between">
+            <div className="w-32 h-8 bg-current opacity-10 rounded"></div>
+            <div className="w-24 h-4 bg-current opacity-10 rounded"></div>
+          </div>
+          <div className="space-y-6 text-justify opacity-80 font-serif leading-loose text-sm">
+            <p>THIS AGREEMENT is made on the 14th day of December, 2025...</p>
+            <p>1. DEFINITIONS. "Confidential Information" means all information disclosed by Disclosing Party...</p>
+            <p className="bg-amber-500/20 -mx-2 px-2 py-1 rounded border-l-2 border-amber-500 relative group">
+              2. INDEMNIFICATION. Receiving Party agrees to indemnify Disclosing Party for any and all losses, unlimited in scope and duration...
+              <span className="absolute -right-32 top-0 text-amber-500 text-xs font-sans font-bold flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <ChevronLeft size={12} /> High Risk
+              </span>
+            </p>
+            <p>3. TERM. This agreement shall remain in effect for a period of five (5) years...</p>
+            {[1, 2, 3, 4, 5].map((i) => (
+              <div key={i} className="space-y-3">
+                <div className="w-full h-3 bg-current opacity-10 rounded"></div>
+                <div className="w-[90%] h-3 bg-current opacity-10 rounded"></div>
+                <div className="w-[95%] h-3 bg-current opacity-10 rounded"></div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Right: AI Findings Panel */}
+      <div className={`w-[400px] border-l flex flex-col ${isDark ? 'bg-[#0B0C10] border-white/5' : 'bg-white border-black/5'}`}>
+        <div className="p-6 border-b border-white/5">
+          <h3 className={`font-serif text-xl mb-1 ${styles.textMain(isDark)}`}>AI Analysis</h3>
+          <p className={`text-xs ${styles.textSec(isDark)}`}>Powered by Juris-LLM v4</p>
+        </div>
+
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          <div className={`p-5 rounded-xl border-l-2 border-amber-500 ${isDark ? 'bg-[#151515]' : 'bg-amber-50/50'}`}>
+            <div className="flex items-center gap-2 mb-3">
+              <AlertTriangle size={16} className="text-amber-500" />
+              <span className={`text-sm font-bold ${styles.textMain(isDark)}`}>Uncapped Liability</span>
+            </div>
+            <p className={`text-sm mb-4 leading-relaxed ${styles.textSec(isDark)}`}>
+              Clause 2.1 contains unlimited indemnification language. Market standard for this transaction type typically caps liability at 2x contract value.
+            </p>
+            <div className="space-y-2">
+              <button className={`w-full py-2 rounded-lg text-xs font-bold border transition-colors ${isDark ? 'border-white/10 hover:bg-white/5 text-white' : 'border-black/10 hover:bg-black/5 text-black'}`}>
+                Auto-Draft Amendment
+              </button>
+              <button className={`w-full py-2 rounded-lg text-xs font-bold transition-colors ${isDark ? 'text-gray-500 hover:text-white' : 'text-gray-400 hover:text-black'}`}>
+                Ignore
+              </button>
+            </div>
+          </div>
+
+          <div className={`p-5 rounded-xl border-l-2 border-emerald-500 ${isDark ? 'bg-[#151515]' : 'bg-gray-50'}`}>
+            <div className="flex items-center gap-2 mb-3">
+              <CheckCircle2 size={16} className="text-emerald-500" />
+              <span className={`text-sm font-bold ${styles.textMain(isDark)}`}>Jurisdiction Check</span>
+            </div>
+            <p className={`text-sm leading-relaxed ${styles.textSec(isDark)}`}>
+              Governing law is set to NY State, consistent with previous agreements with this counterparty.
+            </p>
+          </div>
+        </div>
+
+        <div className={`p-4 border-t ${isDark ? 'border-white/5' : 'border-black/5'}`}>
+          <div className={`flex items-center gap-3 p-3 rounded-xl ${isDark ? 'bg-white/5' : 'bg-black/5'}`}>
+            <SparklesIcon size={18} className="text-amber-500" />
+            <input
+              type="text"
+              placeholder="Ask about this contract..."
+              className="bg-transparent border-none outline-none text-sm w-full font-light"
+            />
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+);
+
+// Helper Icon for the chat
+const SparklesIcon = ({ className, size }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    className={className}
+  >
+    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+  </svg>
+);
+
+// --- DESKTOP LAYOUT ---
+
+export default function EliteJuristDesktop() {
+  const [isDark, setIsDark] = useState(true);
+  const [activeTab, setActiveTab] = useState('dashboard'); // dashboard | analysis
+  const [collapsed, setCollapsed] = useState(false);
+
+  return (
+    <div className={`flex h-screen w-full font-sans transition-colors duration-500 ${styles.bg(isDark)}`}>
+      {/* SIDEBAR */}
+      <aside
+        className={`
+        flex flex-col h-full transition-all duration-300 z-50
+        ${collapsed ? 'w-20' : 'w-[280px]'}
+        ${styles.sidebar(isDark)}
+      `}
+      >
+        {/* Logo Area */}
+        <div className="h-24 flex items-center px-6 justify-between">
+          <div className="flex items-center gap-3">
+            <div className={`w-10 h-10 min-w-[40px] rounded-full flex items-center justify-center border transition-colors ${isDark ? 'border-white/20 bg-white/5' : 'border-black/10 bg-white'}`}>
+              <span className={`font-serif font-bold text-xl ${styles.textMain(isDark)}`}>J.</span>
+            </div>
+            {!collapsed && <span className={`font-serif font-bold text-lg tracking-tight ${styles.textMain(isDark)} animate-in fade-in`}>Juris</span>}
+          </div>
+          <button
+            onClick={() => setCollapsed((prev) => !prev)}
+            className={`p-2 rounded-lg ${isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-black'}`}
+            aria-label="Toggle sidebar"
+          >
+            {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+          </button>
+        </div>
+
+        {/* Navigation */}
+        <nav className="flex-1 px-4 py-6">
+          <div className="mb-2 px-2 text-[10px] font-bold uppercase tracking-widest opacity-40">{!collapsed ? 'Main Menu' : '•'}</div>
+          <SidebarItem icon={LayoutDashboard} label="Dashboard" active={activeTab === 'dashboard'} collapsed={collapsed} isDark={isDark} onClick={() => setActiveTab('dashboard')} />
+          <SidebarItem icon={FileText} label="Document Analysis" active={activeTab === 'analysis'} collapsed={collapsed} isDark={isDark} onClick={() => setActiveTab('analysis')} />
+          <SidebarItem icon={FolderOpen} label="Case Archive" active={false} collapsed={collapsed} isDark={isDark} />
+          <SidebarItem icon={PieChart} label="Analytics" active={false} collapsed={collapsed} isDark={isDark} />
+
+          <div className="mt-8 mb-2 px-2 text-[10px] font-bold uppercase tracking-widest opacity-40">{!collapsed ? 'Settings' : '•'}</div>
+          <SidebarItem icon={Settings} label="Configuration" active={false} collapsed={collapsed} isDark={isDark} />
+        </nav>
+
+        {/* Sidebar Footer */}
+        <div className="p-4 border-t border-white/5 flex gap-2">
+          <button
+            onClick={() => setIsDark((prev) => !prev)}
+            className={`flex-1 flex items-center justify-center p-3 rounded-xl transition-colors ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}
+            aria-label="Toggle theme"
+          >
+            <Zap size={20} className={isDark ? 'text-white' : 'text-black'} />
+          </button>
+          <button
+            onClick={() => setCollapsed((prev) => !prev)}
+            className={`p-3 rounded-xl transition-colors ${isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-black'}`}
+            aria-label="Collapse sidebar"
+          >
+            {collapsed ? <Menu size={18} /> : <X size={18} />}
+          </button>
+        </div>
+      </aside>
+
+      {/* MAIN CONTENT AREA */}
+      <main className="flex-1 overflow-auto relative">
+        <div className="fixed inset-0 pointer-events-none">
+          <div className={`absolute top-0 right-0 w-[50%] h-[50%] rounded-full blur-[150px] opacity-[0.03] ${isDark ? 'bg-white' : 'bg-black'}`}></div>
+        </div>
+
+        {activeTab === 'dashboard' && <DashboardView isDark={isDark} />}
+        {activeTab === 'analysis' && <DocumentAnalysisView isDark={isDark} />}
       </main>
 
-      <LuxuryNav isDark={isDark} />
-
       <style>{`
-        @keyframes scan-beam {
-          0% { transform: translateY(-100%); }
-          100% { transform: translateY(360px); }
+        .no-scrollbar::-webkit-scrollbar {
+          display: none;
         }
-        .animate-scan-beam {
-          animation: scan-beam 2s linear infinite;
+        .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
         }
         .animate-in {
-            animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+          animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
         }
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
+          from { opacity: 0; transform: translateY(20px); }
+          to { opacity: 1; transform: translateY(0); }
         }
       `}</style>
     </div>
