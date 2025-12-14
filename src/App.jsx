@@ -120,9 +120,21 @@ const DEFAULT_LLM_SETTINGS = {
 
 const callLLM = async ({ system, user, apiKey, log, settings }) => {
   const model = settings?.model?.trim() || DEFAULT_LLM_SETTINGS.model;
-  const temperature = Number(settings?.temperature ?? DEFAULT_LLM_SETTINGS.temperature);
+  const rawTemperature = Number(settings?.temperature ?? DEFAULT_LLM_SETTINGS.temperature);
   const max_tokens = settings?.maxTokens ? Number(settings.maxTokens) : undefined;
   const top_p = settings?.topP ? Number(settings.topP) : undefined;
+
+  // gpt-5-mini не принимает явную температуру, кроме дефолтной. Убираем параметр и фиксируем поведение.
+  const isGpt5Mini = model?.startsWith('gpt-5-mini');
+  const temperature =
+    isGpt5Mini || Number.isNaN(rawTemperature) || rawTemperature === undefined
+      ? undefined
+      : rawTemperature;
+  if (isGpt5Mini && rawTemperature !== undefined && rawTemperature !== 1) {
+    log?.('info', 'Температура не передана для gpt-5-mini (используется значение по умолчанию)', {
+      requested: rawTemperature,
+    });
+  }
 
   // gpt-5-mini ожидает параметр max_completion_tokens вместо устаревшего max_tokens
   const tokenField = model?.startsWith('gpt-5') ? 'max_completion_tokens' : 'max_tokens';
@@ -133,7 +145,7 @@ const callLLM = async ({ system, user, apiKey, log, settings }) => {
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    temperature,
+    ...(temperature !== undefined ? { temperature } : {}),
     ...(typeof max_tokens === 'number' && !Number.isNaN(max_tokens)
       ? { [tokenField]: max_tokens }
       : {}),
@@ -405,10 +417,18 @@ const AdminPanel = ({ visible, onClose, isDark, apiKey, onSaveKey, settings, onS
                   max="1"
                   step="0.05"
                   value={localSettings.temperature}
+                  disabled={localSettings.model?.startsWith('gpt-5-mini')}
                   onChange={(e) => setLocalSettings((s) => ({ ...s, temperature: Number(e.target.value) }))}
                   className="w-full"
                 />
-                <div className={`text-sm ${t.textPrimary}`}>{localSettings.temperature}</div>
+                <div className={`text-sm ${t.textPrimary}`}>
+                  {localSettings.temperature}
+                  {localSettings.model?.startsWith('gpt-5-mini') && (
+                    <span className={`ml-2 text-xs ${t.textSecondary}`}>
+                      Для gpt-5-mini температура фиксирована, параметр не отправляется
+                    </span>
+                  )}
+                </div>
               </div>
               <div>
                 <label className={`text-xs uppercase tracking-widest font-bold ${t.textSecondary}`}>Top P</label>
@@ -448,7 +468,8 @@ const AdminPanel = ({ visible, onClose, isDark, apiKey, onSaveKey, settings, onS
         <div className={`mt-4 text-xs ${t.textSecondary}`}>
           Настройки применяются к шагам: парсер → red team → судья. Для gpt-5-mini используется параметр
           <span className="font-semibold"> max_completion_tokens</span>, поэтому численное значение сохраняется, но передается в
-          актуальном поле. Для экономии токенов уменьшайте лимит и температуру.
+          актуальном поле. Для gpt-5-mini температура зафиксирована провайдером (параметр не отправляется вручную), поэтому для
+          экономии токенов используйте лимит и top-p.
         </div>
       </div>
     </div>
