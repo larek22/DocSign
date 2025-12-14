@@ -124,6 +124,9 @@ const callLLM = async ({ system, user, apiKey, log, settings }) => {
   const max_tokens = settings?.maxTokens ? Number(settings.maxTokens) : undefined;
   const top_p = settings?.topP ? Number(settings.topP) : undefined;
 
+  // gpt-5-mini ожидает параметр max_completion_tokens вместо устаревшего max_tokens
+  const tokenField = model?.startsWith('gpt-5') ? 'max_completion_tokens' : 'max_tokens';
+
   const payload = {
     model,
     messages: [
@@ -131,7 +134,9 @@ const callLLM = async ({ system, user, apiKey, log, settings }) => {
       { role: 'user', content: user },
     ],
     temperature,
-    ...(typeof max_tokens === 'number' && !Number.isNaN(max_tokens) ? { max_tokens } : {}),
+    ...(typeof max_tokens === 'number' && !Number.isNaN(max_tokens)
+      ? { [tokenField]: max_tokens }
+      : {}),
     ...(typeof top_p === 'number' && !Number.isNaN(top_p) ? { top_p } : {}),
   };
 
@@ -441,7 +446,9 @@ const AdminPanel = ({ visible, onClose, isDark, apiKey, onSaveKey, settings, onS
         </div>
 
         <div className={`mt-4 text-xs ${t.textSecondary}`}>
-          Настройки применяются к шагам: парсер → red team → судья. Для экономии токенов уменьшайте max tokens и температуру.
+          Настройки применяются к шагам: парсер → red team → судья. Для gpt-5-mini используется параметр
+          <span className="font-semibold"> max_completion_tokens</span>, поэтому численное значение сохраняется, но передается в
+          актуальном поле. Для экономии токенов уменьшайте лимит и температуру.
         </div>
       </div>
     </div>
