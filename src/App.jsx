@@ -371,10 +371,23 @@ const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi
   const [step, setStep] = useState(0);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
+  const onCompleteRef = useRef(onComplete);
+  const onErrorRef = useRef(onError);
+  const runningRef = useRef(false);
+
+  useEffect(() => {
+    onCompleteRef.current = onComplete;
+  }, [onComplete]);
+
+  useEffect(() => {
+    onErrorRef.current = onError;
+  }, [onError]);
 
   useEffect(() => {
     let cancelled = false;
     const run = async () => {
+      if (runningRef.current) return;
+      runningRef.current = true;
       try {
         setError('');
         setStep(1);
@@ -392,20 +405,27 @@ const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi
         if (cancelled) return;
         setStep(4);
         await new Promise((resolve) => setTimeout(resolve, 400));
-        onComplete(result);
+        onCompleteRef.current?.(result);
       } catch (err) {
         if (cancelled) return;
         setError(err.message || 'Неизвестная ошибка при анализе документа.');
         onLog?.('error', 'Ошибка пайплайна', { message: err.message });
-        if (onError) onError(err.message || 'Ошибка анализа');
+        onErrorRef.current?.(err.message || 'Ошибка анализа');
+      } finally {
+        runningRef.current = false;
       }
     };
+
+    if (!doc?.text) {
+      setError('Не удалось прочитать документ. Загрузите файл ещё раз.');
+      return undefined;
+    }
 
     run();
     return () => {
       cancelled = true;
     };
-  }, [apiKey, doc, onComplete, attempt, onError]);
+  }, [apiKey, doc, attempt, onLog]);
 
   const steps = [
     '1. Парсинг и структурирование (статьи, пункты)',
