@@ -202,7 +202,7 @@ const StepIndicator = ({ status, label, isDark }) => {
   );
 };
 
-const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi }) => {
+const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi, onError }) => {
   const t = isDark ? theme.dark : theme.light;
   const [step, setStep] = useState(0);
   const [error, setError] = useState('');
@@ -226,6 +226,7 @@ const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi
       } catch (err) {
         if (cancelled) return;
         setError(err.message || 'Неизвестная ошибка при анализе документа.');
+        if (onError) onError(err.message || 'Ошибка анализа');
       }
     };
 
@@ -233,7 +234,7 @@ const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi
     return () => {
       cancelled = true;
     };
-  }, [apiKey, doc, onComplete, attempt]);
+  }, [apiKey, doc, onComplete, attempt, onError]);
 
   const steps = [
     '1. Парсинг и структурирование (статьи, пункты)',
@@ -783,6 +784,11 @@ const MobileExperience = ({ onSwitch, onOpenApi, apiKey }) => {
           apiKey={apiKey}
           doc={pendingDoc}
           onOpenApi={onOpenApi}
+          onError={(message) => {
+            setPipelineError(message || 'Не удалось завершить анализ.');
+            setView('dashboard');
+            setPendingDoc(null);
+          }}
           onCancel={() => {
             setPipelineError('Анализ остановлен пользователем.');
             setView('dashboard');
@@ -1099,7 +1105,7 @@ const DashboardView = ({ isDark, onStartUpload }) => (
 );
 
 
-const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey }) => {
+const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey, pipelineError = '' }) => {
   const { text, issues, name, pipeline } = documentData;
   const preview = text.split(/\n+/).filter(Boolean).slice(0, 6);
 
@@ -1315,6 +1321,11 @@ const DesktopExperience = ({ onSwitch, apiKey, onOpenApi }) => {
           apiKey={apiKey}
           doc={pendingDoc}
           onOpenApi={onOpenApi}
+          onError={(message) => {
+            setPipelineError(message || 'Не удалось завершить анализ.');
+            setShowPipeline(false);
+            setPendingDoc(null);
+          }}
           onCancel={() => {
             setPipelineError('Анализ прерван. Проверьте ключ или формат файла.');
             setShowPipeline(false);
