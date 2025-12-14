@@ -1,12 +1,14 @@
 # DocSign
 
-Desktop-first prototype for an "Elite Jurist" contract review experience. Built with React, Vite, Tailwind CSS, and lucide-react icons.
+Русскоязычный прототип AI-помощника для анализа договоров. В проекте есть две версии интерфейса:
+- **Десктоп** — боковая панель, таблицы дел, сплит-режим просмотра документа и AI-инсайты.
+- **Мобильная** — компактный дашборд с картами, загрузкой и редактированием текста с подсветкой рисков.
 
-## Getting started
+## Запуск
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open the printed local URL in your browser to explore the dashboard and scan workspace views. Toggle dark/light mode from the top bar.
+Откройте адрес из консоли в браузере. Переключение между десктопной и мобильной версиями доступно из интерфейса (кнопка в хедере/сайдбаре). Светлая/тёмная тема включается тем же переключателем.

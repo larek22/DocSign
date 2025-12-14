@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   Scale,
   FileText,
@@ -16,60 +16,588 @@ import {
   PieChart,
   CheckCircle2,
   AlertTriangle,
+  ShieldCheck,
+  UploadCloud,
+  BookOpen,
+  Sparkles,
+  Fingerprint,
+  Bookmark,
+  Activity,
+  ShieldAlert,
 } from 'lucide-react';
 
-// --- THEME ENGINE ---
-// Тот же движок, адаптированный под большие площади
-const styles = {
-  bg: (dark) => (dark ? 'bg-[#080808]' : 'bg-[#F5F2EB]'),
-  sidebar: (dark) =>
-    dark ? 'bg-[#0B0C10] border-r border-white/5' : 'bg-[#FDFBF7] border-r border-[#E5E0D6]',
-  textMain: (dark) => (dark ? 'text-[#EAEAEA]' : 'text-[#1A1A1A]'),
-  textSec: (dark) => (dark ? 'text-[#888888]' : 'text-[#666660]'),
-  glass: (dark) =>
-    dark ? 'bg-[#1A1A1A]/40 backdrop-blur-md border border-white/5' : 'bg-[#FFFFFF]/60 backdrop-blur-md border border-black/5',
-  card: (dark) =>
-    dark ? 'bg-[#121212] border border-white/5 hover:border-white/10' : 'bg-white border border-[#E5E0D6] hover:border-[#D4AF37]/30',
-  goldText: 'text-[#C5A059]',
-  accentGradient: 'bg-gradient-to-br from-[#C5A059] to-[#8A6E36]',
+// --- ОБЩИЕ СТИЛИ И ТЕМА ---
+const Fonts = () => (
+  <style>{`
+    @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,600;0,700;1,400&family=Inter:wght@300;400;500;600&display=swap&subset=cyrillic');
+    .font-serif-display { font-family: 'Playfair Display', serif; }
+    .font-sans-ui { font-family: 'Inter', sans-serif; }
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    .animate-in { animation: fadeIn 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  `}</style>
+);
+
+const theme = {
+  dark: {
+    bg: 'bg-[#0F0F0F]',
+    paper: 'bg-[#1A1A1A]',
+    textPrimary: 'text-[#E0E0E0]',
+    textSecondary: 'text-[#888888]',
+    border: 'border-[#333333]',
+    accent: 'text-[#C5A059]',
+    accentBg: 'bg-[#C5A059]',
+    success: 'text-emerald-500',
+    highlightCritical:
+      'bg-red-900/30 text-red-200 border-b-2 border-red-500 cursor-pointer hover:bg-red-900/50',
+    highlightWarning:
+      'bg-amber-900/30 text-amber-200 border-b-2 border-amber-500 cursor-pointer hover:bg-amber-900/50',
+  },
+  light: {
+    bg: 'bg-[#F9F7F2]',
+    paper: 'bg-[#FFFFFF]',
+    textPrimary: 'text-[#1A1A1A]',
+    textSecondary: 'text-[#666660]',
+    border: 'border-[#E5E0D6]',
+    accent: 'text-[#B08D55]',
+    accentBg: 'bg-[#B08D55]',
+    success: 'text-emerald-600',
+    highlightCritical: 'bg-red-100 text-red-900 border-b-2 border-red-500 cursor-pointer hover:bg-red-200',
+    highlightWarning:
+      'bg-amber-100 text-amber-900 border-b-2 border-amber-500 cursor-pointer hover:bg-amber-200',
+  },
 };
 
-// --- UI COMPONENTS ---
+// --- МОБИЛЬНЫЕ КОМПОНЕНТЫ ---
+const Button = ({ children, variant = 'primary', onClick, className = '', isDark, disabled }) => {
+  const base =
+    'px-5 py-3 rounded-xl font-sans-ui font-medium text-sm transition-all active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed';
+  const styles = {
+    primary: isDark
+      ? 'bg-[#C5A059] text-black hover:bg-[#D4AF37]'
+      : 'bg-[#1A1A1A] text-white hover:bg-[#333] ',
+    secondary: isDark
+      ? 'bg-white/5 text-white border border-white/10 hover:bg-white/10'
+      : 'bg-white text-black border border-gray-200 hover:bg-gray-50',
+    ghost: 'bg-transparent opacity-60 hover:opacity-100',
+  };
+
+  return (
+    <button onClick={onClick} disabled={disabled} className={`${base} ${styles[variant]} ${className}`}>
+      {children}
+    </button>
+  );
+};
+
+const UploadScreen = ({ isDark, onUploadComplete, onCancel }) => {
+  const t = isDark ? theme.dark : theme.light;
+  const [isScanning, setIsScanning] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  const handleSimulateUpload = () => {
+    setIsScanning(true);
+    const interval = setInterval(() => {
+      setProgress((prev) => {
+        if (prev >= 100) {
+          clearInterval(interval);
+          setTimeout(onUploadComplete, 500);
+          return 100;
+        }
+        return prev + 2;
+      });
+    }, 30);
+  };
+
+  return (
+    <div className={`fixed inset-0 z-50 flex items-center justify-center ${t.bg} bg-opacity-95 animate-in`}>
+      <button onClick={onCancel} className={`absolute top-6 left-6 p-2 rounded-full ${t.textSecondary} hover:bg-white/5`}>
+        <X size={24} />
+      </button>
+
+      <div className="w-full max-w-md px-6">
+        <div
+          onClick={!isScanning ? handleSimulateUpload : undefined}
+          className={`
+            relative aspect-[4/5] rounded-3xl border-2 border-dashed transition-all duration-500 flex flex-col items-center justify-center cursor-pointer group overflow-hidden
+            ${isScanning ? 'border-transparent bg-black/5' : `${t.border} hover:border-[#C5A059]`}
+            ${isDark ? 'hover:bg-white/5' : 'hover:bg-black/5'}
+          `}
+        >
+          {isScanning ? (
+            <>
+              <div className="absolute inset-0 bg-gradient-to-b from-transparent via-[#C5A059]/20 to-transparent w-full h-[20%] animate-[scan_2s_linear_infinite]" />
+              <div className="flex flex-col items-center z-10">
+                <div className={`w-16 h-16 rounded-2xl mb-6 flex items-center justify-center ${t.accentBg} text-black animate-pulse`}>
+                  <FileText size={32} />
+                </div>
+                <h3 className={`font-serif-display text-xl ${t.textPrimary} mb-2`}>Анализ структуры...</h3>
+                <p className={`font-mono text-sm ${t.accent}`}>{progress}%</p>
+              </div>
+            </>
+          ) : (
+            <div className="flex flex-col items-center text-center p-8 transition-transform duration-300 group-hover:scale-105">
+              <div className={`w-20 h-20 rounded-full flex items-center justify-center mb-6 ${isDark ? 'bg-[#1A1A1A]' : 'bg-white'} shadow-xl`}>
+                <UploadCloud size={32} className={t.accent} />
+              </div>
+              <h3 className={`font-serif-display text-2xl ${t.textPrimary} mb-2`}>Загрузите договор</h3>
+              <p className={`text-sm ${t.textSecondary} mb-8`}>
+                PDF, DOCX или изображение.
+                <br />AI распознает текст автоматически.
+              </p>
+              <Button variant="primary" isDark={isDark} className="pointer-events-none">
+                Выбрать файл
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+      <style>{`
+        @keyframes scan {
+          0% { top: -20%; }
+          100% { top: 120%; }
+        }
+      `}</style>
+    </div>
+  );
+};
+
+const INITIAL_TEXT = `
+ДОГОВОР О КОНФИДЕНЦИАЛЬНОСТИ (NDA)
+
+1. Предмет соглашения. Принимающая сторона обязуется сохранять в тайне любую Конфиденциальную информацию, полученную от Раскрывающей стороны.
+
+2. Ответственность. В случае разглашения Конфиденциальной информации Принимающая сторона обязуется возместить Раскрывающей стороне все убытки в полном объеме, включая упущенную выгоду, независимо от наличия вины Принимающей стороны. Штрафная неустойка составляет 5 000 000 (пять миллионов) рублей за каждый факт нарушения.
+
+3. Срок действия. Настоящее Соглашение действует бессрочно и не может быть расторгнуто Принимающей стороной в одностороннем порядке.
+
+4. Применимое право. К отношениям сторон применяется право Российской Федерации. Споры подлежат разрешению в Арбитражном суде г. Москвы.
+`;
+
+const INITIAL_ISSUES = [
+  {
+    id: 'issue-1',
+    type: 'critical',
+    textMatch: 'независимо от наличия вины',
+    title: 'Риск безусловной ответственности',
+    description:
+      'Формулировка возлагает ответственность даже при отсутствии вины. Это создает чрезмерные риски для Исполнителя.',
+    suggestion: 'при наличии документально подтвержденной вины (умысла или грубой неосторожности)',
+    category: 'Ответственность (ст. 401 ГК РФ)',
+  },
+  {
+    id: 'issue-2',
+    type: 'warning',
+    textMatch: 'действует бессрочно',
+    title: 'Бессрочный характер обязательств',
+    description:
+      'Бессрочные обязательства могут ограничивать конкуренцию. Рекомендуется установить разумный срок охраны.',
+    suggestion: 'действует в течение 5 (пяти) лет с момента передачи информации',
+    category: 'Срок действия',
+  },
+];
+
+const DocumentWorkspace = ({ isDark, onBack, onSave }) => {
+  const t = isDark ? theme.dark : theme.light;
+  const [text, setText] = useState(INITIAL_TEXT);
+  const [issues, setIssues] = useState(INITIAL_ISSUES);
+  const [selectedIssue, setSelectedIssue] = useState(null);
+  const [isAllClean, setIsAllClean] = useState(false);
+
+  const handleApplyFix = (issue) => {
+    const newText = text.replace(issue.textMatch, issue.suggestion);
+    const remaining = issues.filter((i) => i.id !== issue.id);
+    setText(newText);
+    setIssues(remaining);
+    setSelectedIssue(null);
+    if (remaining.length === 0) setTimeout(() => setIsAllClean(true), 400);
+  };
+
+  const interactiveText = useMemo(() => {
+    let parts = [{ text, type: 'normal', id: null }];
+    issues.forEach((issue) => {
+      const next = [];
+      parts.forEach((part) => {
+        if (part.type !== 'normal') {
+          next.push(part);
+          return;
+        }
+        const index = part.text.indexOf(issue.textMatch);
+        if (index === -1) {
+          next.push(part);
+        } else {
+          if (index > 0) next.push({ text: part.text.slice(0, index), type: 'normal' });
+          next.push({ text: part.text.slice(index, index + issue.textMatch.length), type: issue.type, id: issue.id });
+          if (index + issue.textMatch.length < part.text.length) {
+            next.push({ text: part.text.slice(index + issue.textMatch.length), type: 'normal' });
+          }
+        }
+      });
+      parts = next;
+    });
+    return parts;
+  }, [issues, text]);
+
+  if (isAllClean) {
+    return (
+      <div className={`fixed inset-0 z-50 flex items-center justify-center ${t.bg} animate-in`}>
+        <div className="text-center p-8 max-w-sm">
+          <div className={`w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-6 bg-emerald-500/10 text-emerald-500 animate-[scaleIn_0.4s_ease]`}>
+            <ShieldCheck size={48} strokeWidth={1.5} />
+          </div>
+          <h2 className={`font-serif-display text-3xl mb-4 ${t.textPrimary}`}>Договор чист</h2>
+          <p className={`text-sm ${t.textSecondary} mb-8`}>
+            Все критические риски устранены. Документ готов к подписанию.
+          </p>
+          <Button variant="primary" isDark={isDark} onClick={() => onSave(0)} className="w-full">
+            Сохранить в архив
+          </Button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`fixed inset-0 z-50 flex flex-col ${t.bg} animate-in`}>
+      <div className={`h-16 border-b ${t.border} flex items-center justify-between px-4 backdrop-blur-md`}>
+        <div className="flex items-center gap-3">
+          <button onClick={onBack} className={`p-2 rounded-full hover:bg-black/5 ${t.textSecondary}`} aria-label="Назад">
+            <X size={20} />
+          </button>
+          <div>
+            <h3 className={`font-serif-display text-lg ${t.textPrimary}`}>Режим правки</h3>
+            <p className={`text-xs ${t.textSecondary} flex items-center gap-2`}>
+              {issues.length === 0 ? (
+                <span className="text-emerald-500 font-medium flex items-center gap-1">
+                  <CheckCircle2 size={12} /> Чисто
+                </span>
+              ) : (
+                <span className="text-amber-500 font-medium flex items-center gap-1">
+                  <Activity size={12} /> Активных рисков: {issues.length}
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+        <Button variant="ghost" className={`!text-xs ${t.textSecondary}`} onClick={() => onSave(issues.length)}>
+          Сохранить как есть
+        </Button>
+      </div>
+
+      <div className="flex-1 overflow-hidden relative flex flex-col">
+        <div className="flex-1 overflow-y-auto p-6 md:p-12 leading-loose whitespace-pre-wrap font-serif-display text-lg md:text-xl selection:bg-amber-500/30">
+          <div className={`max-w-3xl mx-auto ${t.textPrimary} transition-all duration-500`}>
+            {interactiveText.map((part, index) => {
+              if (part.type === 'normal') return <span key={index}>{part.text}</span>;
+              const style = part.type === 'critical' ? t.highlightCritical : t.highlightWarning;
+              const target = issues.find((i) => i.id === part.id);
+              return (
+                <span
+                  key={index}
+                  className={`rounded px-1 transition-all duration-300 border-b-2 ${style}`}
+                  onClick={() => setSelectedIssue(target)}
+                >
+                  {part.text}
+                </span>
+              );
+            })}
+          </div>
+          <div className="h-40" />
+        </div>
+
+        {selectedIssue && (
+          <div className={`absolute bottom-0 left-0 right-0 ${t.paper} border-t ${t.border} shadow-2xl p-6 rounded-t-3xl animate-[slideUp_0.4s_cubic-bezier(0.16,1,0.3,1)] z-30`}>
+            <div className="max-w-3xl mx-auto">
+              <div className="flex justify-between items-start mb-4">
+                <div className="flex items-center gap-2">
+                  {selectedIssue.type === 'critical' ? (
+                    <span className="bg-red-500/10 text-red-500 text-[10px] font-bold px-2 py-1 rounded border border-red-500/20 uppercase tracking-wider">
+                      Критично
+                    </span>
+                  ) : (
+                    <span className="bg-amber-500/10 text-amber-500 text-[10px] font-bold px-2 py-1 rounded border border-amber-500/20 uppercase tracking-wider">
+                      Внимание
+                    </span>
+                  )}
+                  <span className={`text-xs font-mono uppercase tracking-widest ${t.textSecondary} hidden sm:inline-block`}>
+                    {selectedIssue.category}
+                  </span>
+                </div>
+                <button onClick={() => setSelectedIssue(null)} className={t.textSecondary} aria-label="Закрыть">
+                  <X size={20} />
+                </button>
+              </div>
+
+              <h4 className={`text-xl font-serif-display mb-2 ${t.textPrimary}`}>{selectedIssue.title}</h4>
+              <p className={`text-sm mb-6 ${t.textSecondary} leading-relaxed`}>{selectedIssue.description}</p>
+
+              <div className={`p-5 rounded-xl border mb-6 relative overflow-hidden ${isDark ? 'bg-black/40 border-white/5' : 'bg-gray-50 border-gray-200'}`}>
+                <div className="absolute top-0 left-0 w-1 h-full bg-gradient-to-b from-red-500 to-emerald-500 opacity-70" />
+                <div className="flex flex-col gap-4">
+                  <div className="opacity-60 pl-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                      <p className="text-[10px] uppercase font-bold text-red-400">Было</p>
+                    </div>
+                    <p className={`text-sm line-through decoration-red-400/40 ${t.textSecondary}`}>
+                      "{selectedIssue.textMatch}"
+                    </p>
+                  </div>
+                  <div className="pl-3">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                      <p className="text-[10px] uppercase font-bold text-emerald-500">Станет</p>
+                    </div>
+                    <p className={`text-sm font-medium ${t.textPrimary}`}>
+                      "{selectedIssue.suggestion}"
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <Button variant="primary" isDark={isDark} onClick={() => handleApplyFix(selectedIssue)} className="flex-1 shadow-lg shadow-amber-500/20">
+                  Заменить текст
+                </Button>
+                <Button variant="secondary" isDark={isDark} onClick={() => setSelectedIssue(null)} className="flex-1">
+                  Править вручную
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+      <style>{`
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+      `}</style>
+    </div>
+  );
+};
+
+const StatCardMobile = ({ label, value, icon: Icon, isDark, trend }) => {
+  const t = isDark ? theme.dark : theme.light;
+  return (
+    <div className={`p-5 rounded-2xl border ${t.border} ${t.paper} flex flex-col justify-between h-36 relative overflow-hidden group hover:border-[#C5A059]/50 transition-all duration-300 shadow-sm`}>
+      <div className="flex justify-between items-start z-10">
+        <Icon size={22} className={t.accent} strokeWidth={1.5} />
+        {trend && <span className="text-[10px] font-bold text-emerald-500 bg-emerald-500/10 px-2 py-1 rounded-full">{trend}</span>}
+      </div>
+      <div className="z-10">
+        <h3 className={`text-3xl font-serif-display ${t.textPrimary} mb-1`}>{value}</h3>
+        <p className={`text-xs uppercase tracking-wider font-medium ${t.textSecondary}`}>{label}</p>
+      </div>
+      <Icon size={100} className={`absolute -bottom-6 -right-6 opacity-[0.03] ${t.textPrimary} rotate-[-15deg] group-hover:rotate-0 transition-transform duration-500`} />
+    </div>
+  );
+};
+
+const RecentMatter = ({ matter, isDark }) => {
+  const t = isDark ? theme.dark : theme.light;
+  const statusConfig = {
+    Cleared: { text: 'Согласовано', style: 'text-emerald-500 bg-emerald-500/10 border border-emerald-500/20' },
+    Attention: { text: 'Риски', style: 'text-amber-500 bg-amber-500/10 border border-amber-500/20' },
+    Critical: { text: 'Критично', style: 'text-red-500 bg-red-500/10 border border-red-500/20' },
+  };
+  const config = statusConfig[matter.status] || statusConfig.Cleared;
+
+  return (
+    <div className={`p-4 rounded-xl border ${t.border} ${t.paper} flex items-center justify-between group hover:border-[#C5A059]/30 transition-all cursor-pointer`}>
+      <div className="flex items-center gap-4">
+        <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${isDark ? 'bg-white/5 group-hover:bg-[#C5A059]/10' : 'bg-gray-100'} ${t.textPrimary}`}>
+          <FileText size={18} strokeWidth={1.5} className="group-hover:text-[#C5A059] transition-colors" />
+        </div>
+        <div>
+          <h4 className={`font-serif-display text-sm mb-0.5 ${t.textPrimary}`}>{matter.title}</h4>
+          <p className={`text-xs ${t.textSecondary}`}>{matter.date}</p>
+        </div>
+      </div>
+      <div className={`px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-widest ${config.style}`}>{config.text}</div>
+    </div>
+  );
+};
+
+const MobileExperience = ({ onSwitch }) => {
+  const [isDark, setIsDark] = useState(true);
+  const [view, setView] = useState('dashboard');
+  const [matters, setMatters] = useState([
+    { id: 1, title: 'Договор поставки #542', date: 'Сегодня', status: 'Attention' },
+    { id: 2, title: 'NDA с партнёром', date: 'Вчера', status: 'Cleared' },
+  ]);
+
+  const t = isDark ? theme.dark : theme.light;
+
+  const handleSaveResult = (issuesCount) => {
+    const next = [
+      {
+        id: Date.now(),
+        title: `Договор NDA #${Math.floor(Math.random() * 900) + 100}`,
+        date: new Date().toLocaleDateString('ru-RU'),
+        status: issuesCount === 0 ? 'Cleared' : 'Attention',
+      },
+      ...matters,
+    ];
+    setMatters(next);
+    setView('dashboard');
+  };
+
+  return (
+    <div className={`min-h-screen transition-colors duration-700 font-sans-ui ${t.bg} selection:bg-[#C5A059]/30`}> 
+      <Fonts />
+      {view === 'upload' && (
+        <UploadScreen isDark={isDark} onCancel={() => setView('dashboard')} onUploadComplete={() => setView('workspace')} />
+      )}
+      {view === 'workspace' && <DocumentWorkspace isDark={isDark} onBack={() => setView('dashboard')} onSave={handleSaveResult} />}
+
+      {view === 'dashboard' && (
+        <div className="pb-24 max-w-lg mx-auto min-h-screen flex flex-col relative">
+          <header className="pt-8 pb-4 px-6 flex justify-between items-center sticky top-0 z-20 backdrop-blur-md">
+            <div className="flex items-center gap-3">
+              <div className={`w-9 h-9 rounded-lg flex items-center justify-center border ${t.border} bg-white/5`}>
+                <Scale size={18} className={t.textPrimary} />
+              </div>
+              <span className={`font-serif-display font-bold text-lg ${t.textPrimary}`}>Jurist AI</span>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={onSwitch}
+                className={`px-3 py-2 rounded-lg text-xs font-semibold ${isDark ? 'bg-white/10 text-white' : 'bg-black/5 text-black'}`}
+              >
+                Десктоп
+              </button>
+              <button
+                onClick={() => setIsDark(!isDark)}
+                className={`p-2.5 rounded-full ${t.textSecondary} hover:bg-white/5 transition-colors`}
+                aria-label="Смена темы"
+              >
+                {isDark ? <Sparkles size={18} /> : <span className="w-4 h-4 rounded-full bg-black block" />}
+              </button>
+            </div>
+          </header>
+
+          <div className="px-6 mb-8 animate-in">
+            <p className={`text-[10px] font-bold tracking-[0.2em] uppercase mb-3 ${t.accent}`}>
+              {new Date().toLocaleDateString('ru-RU', { weekday: 'long', month: 'long', day: 'numeric' })}
+            </p>
+            <h1 className={`font-serif-display text-4xl mb-2 ${t.textPrimary} leading-tight`}>
+              Добрый день,
+              <br />
+              Коллега.
+            </h1>
+          </div>
+
+          <div className="px-6 grid grid-cols-2 gap-4 mb-8 animate-in" style={{ animationDelay: '0.1s' }}>
+            <StatCardMobile label="В работе" value={matters.length} icon={Activity} isDark={isDark} trend="+1 нов." />
+            <StatCardMobile label="Согласовано" value="128" icon={ShieldAlert} isDark={isDark} />
+          </div>
+
+          <div className="px-6 mb-10 animate-in" style={{ animationDelay: '0.2s' }}>
+            <button
+              onClick={() => setView('upload')}
+              className={`w-full group relative overflow-hidden rounded-2xl p-6 text-left transition-all duration-300 hover:scale-[1.01] shadow-2xl ${
+                isDark ? 'bg-gradient-to-br from-[#C5A059] to-[#9A7D46]' : 'bg-[#1A1A1A] border border-gray-100'
+              }`}
+            >
+              <div className="relative z-10 flex justify-between items-start">
+                <div>
+                  <div className={`p-3 rounded-full inline-flex mb-4 ${isDark ? 'bg-black/15 text-black' : 'bg-white/10 text-white'}`}>
+                    <Search size={24} strokeWidth={2} />
+                  </div>
+                  <h2 className={`text-2xl font-serif-display mb-1 ${isDark ? 'text-black' : 'text-white'}`}>Анализ документа</h2>
+                  <p className={`text-xs opacity-70 ${isDark ? 'text-black font-medium' : 'text-white'}`}>Загрузить PDF / DOCX</p>
+                </div>
+                <div className={`p-2 rounded-full ${isDark ? 'bg-black/10' : 'bg-white/10'}`}>
+                  <ChevronRight className={isDark ? 'text-black' : 'text-white'} />
+                </div>
+              </div>
+              <div className="absolute -right-6 -bottom-6 opacity-10 transform rotate-12">
+                <BookOpen size={160} />
+              </div>
+            </button>
+          </div>
+
+          <div className="px-6 flex-1 animate-in" style={{ animationDelay: '0.3s' }}>
+            <div className="flex justify-between items-center mb-4">
+              <h3 className={`font-serif-display text-xl ${t.textPrimary}`}>Последние дела</h3>
+              <button className={`text-[10px] font-bold tracking-widest uppercase ${t.textSecondary} hover:${t.textPrimary} transition-colors`}>
+                Все
+              </button>
+            </div>
+
+            <div className="space-y-3 pb-10">
+              {matters.length > 0 ? (
+                matters.map((matter) => <RecentMatter key={matter.id} matter={matter} isDark={isDark} />)
+              ) : (
+                <div className={`text-center py-10 ${t.textSecondary} italic text-sm border border-dashed ${t.border} rounded-xl`}>
+                  Архив пуст.
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="fixed bottom-6 left-6 right-6 z-40">
+            <div
+              className={`h-16 rounded-full mx-auto max-w-[320px] ${
+                isDark ? 'bg-[#1A1A1A]/90 border-white/10' : 'bg-white/90 border-black/5'
+              } backdrop-blur-xl border shadow-[0_8px_32px_0_rgba(0,0,0,0.3)] flex items-center justify-between px-8`}
+            >
+              <button className={`${t.accent} transform scale-110`} aria-label="Главная">
+                <Scale size={24} />
+              </button>
+              <button className={`${t.textSecondary} hover:${t.textPrimary} transition-colors`} aria-label="Поиск">
+                <Search size={22} />
+              </button>
+              <button className={`${t.textSecondary} hover:${t.textPrimary} transition-colors`} aria-label="Закладки">
+                <Bookmark size={22} />
+              </button>
+              <button className={`${t.textSecondary} hover:${t.textPrimary} transition-colors`} aria-label="Профиль">
+                <Fingerprint size={22} />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// --- ДЕСКТОПНЫЕ КОМПОНЕНТЫ ---
+const desktopStyles = {
+  bg: (dark) => (dark ? 'bg-[#080808]' : 'bg-[#F5F2EB]'),
+  sidebar: (dark) => (dark ? 'bg-[#0B0C10] border-r border-white/5' : 'bg-[#FDFBF7] border-r border-[#E5E0D6]'),
+  textMain: (dark) => (dark ? 'text-[#EAEAEA]' : 'text-[#1A1A1A]'),
+  textSec: (dark) => (dark ? 'text-[#888888]' : 'text-[#666660]'),
+  card: (dark) => (dark ? 'bg-[#121212] border border-white/5 hover:border-white/10' : 'bg-white border border-[#E5E0D6] hover:border-[#D4AF37]/30'),
+};
 
 const SidebarItem = ({ icon: Icon, label, active, collapsed, isDark, onClick }) => (
   <button
     onClick={onClick}
-    className={`
-      w-full flex items-center gap-4 p-3 mb-2 rounded-xl transition-all duration-300 group
-      ${
-        active
-          ? isDark
-            ? 'bg-white/10 text-white'
-            : 'bg-[#1A1A1A] text-white'
-          : isDark
-            ? 'text-gray-500 hover:text-white hover:bg-white/5'
-            : 'text-gray-500 hover:text-black hover:bg-black/5'
-      }
-    `}
+    className={`w-full flex items-center gap-4 p-3 mb-2 rounded-xl transition-all duration-300 group ${
+      active
+        ? isDark
+          ? 'bg-white/10 text-white'
+          : 'bg-[#1A1A1A] text-white'
+        : isDark
+        ? 'text-gray-500 hover:text-white hover:bg-white/5'
+        : 'text-gray-500 hover:text-black hover:bg-black/5'
+    }`}
   >
     <Icon size={20} strokeWidth={1.5} className={active ? 'text-[#C5A059]' : ''} />
-    {!collapsed && (
-      <span className={`text-sm font-medium tracking-wide ${collapsed ? 'opacity-0' : 'opacity-100'}`}>{label}</span>
-    )}
+    {!collapsed && <span className={`text-sm font-medium tracking-wide ${collapsed ? 'opacity-0' : 'opacity-100'}`}>{label}</span>}
     {active && !collapsed && <div className="ml-auto w-1.5 h-1.5 rounded-full bg-[#C5A059] shadow-[0_0_8px_#C5A059]" />}
   </button>
 );
 
-const StatCard = ({ title, value, sub, icon: Icon, isDark }) => (
-  <div className={`p-6 rounded-[20px] ${styles.card(isDark)} transition-all duration-300 hover:transform hover:-translate-y-1`}>
+const StatCardDesktop = ({ title, value, sub, icon: Icon, isDark }) => (
+  <div className={`p-6 rounded-[20px] ${desktopStyles.card(isDark)} transition-all duration-300 hover:transform hover:-translate-y-1`}>
     <div className="flex justify-between items-start mb-4">
       <div className={`p-3 rounded-full ${isDark ? 'bg-white/5' : 'bg-black/5'}`}>
-        <Icon size={20} className={styles.goldText} />
+        <Icon size={20} className="text-[#C5A059]" />
       </div>
       <span className={`text-xs font-bold tracking-wider uppercase ${isDark ? 'text-emerald-400' : 'text-emerald-600'}`}>{sub}</span>
     </div>
-    <h3 className={`text-3xl font-serif mb-1 ${styles.textMain(isDark)}`}>{value}</h3>
-    <p className={`text-xs uppercase tracking-widest ${styles.textSec(isDark)}`}>{title}</p>
+    <h3 className={`text-3xl font-serif mb-1 ${desktopStyles.textMain(isDark)}`}>{value}</h3>
+    <p className={`text-xs uppercase tracking-widest ${desktopStyles.textSec(isDark)}`}>{title}</p>
   </div>
 );
 
@@ -80,100 +608,93 @@ const TableRow = ({ client, caseName, status, date, isDark }) => (
         <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-serif ${isDark ? 'bg-white/10' : 'bg-black/10'}`}>
           {client.charAt(0)}
         </div>
-        <span className={`font-medium ${styles.textMain(isDark)}`}>{client}</span>
+        <span className={`font-medium ${desktopStyles.textMain(isDark)}`}>{client}</span>
       </div>
     </td>
-    <td className={`py-4 ${styles.textSec(isDark)}`}>{caseName}</td>
+    <td className={`py-4 ${desktopStyles.textSec(isDark)}`}>{caseName}</td>
     <td className="py-4">
       <span
-        className={`
-        px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border
-        ${status === 'Active' ? 'border-emerald-500/30 text-emerald-500 bg-emerald-500/10' : ''}
-        ${status === 'Review' ? 'border-amber-500/30 text-amber-500 bg-amber-500/10' : ''}
-        ${status === 'Draft' ? 'border-gray-500/30 text-gray-500 bg-gray-500/10' : ''}
-      `}
+        className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border ${
+          status === 'Active' ? 'border-emerald-500/30 text-emerald-500 bg-emerald-500/10' : ''
+        } ${status === 'Review' ? 'border-amber-500/30 text-amber-500 bg-amber-500/10' : ''} ${
+          status === 'Draft' ? 'border-gray-500/30 text-gray-500 bg-gray-500/10' : ''
+        }`}
       >
         {status}
       </span>
     </td>
-    <td className={`py-4 text-sm ${styles.textSec(isDark)}`}>{date}</td>
+    <td className={`py-4 text-sm ${desktopStyles.textSec(isDark)}`}>{date}</td>
     <td className="py-4 pr-4 text-right">
-      <button className={`opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-full ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>
+      <button className={`opacity-0 group-hover:opacity-100 transition-opacity p-2 rounded-full ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/5'}`} aria-label="Действия">
         <MoreHorizontal size={16} />
       </button>
     </td>
   </tr>
 );
 
-// --- MAIN SCREENS ---
-
-const DashboardView = ({ isDark }) => (
+const DashboardView = ({ isDark, onStartAnalysis }) => (
   <div className="p-8 max-w-[1600px] mx-auto animate-in fade-in duration-700">
-    {/* Header Section */}
     <div className="flex justify-between items-end mb-10">
       <div>
-        <p className={`text-xs font-bold tracking-[0.2em] uppercase mb-2 ${styles.goldText}`}>Sunday, 14 Dec • Rome</p>
-        <h1 className={`text-4xl font-serif ${styles.textMain(isDark)}`}>Overview</h1>
+        <p className={`text-xs font-bold tracking-[0.2em] uppercase mb-2 text-[#C5A059]`}>
+          {new Date().toLocaleDateString('ru-RU', { weekday: 'long', month: 'long', day: 'numeric' })}
+        </p>
+        <h1 className={`text-4xl font-serif ${desktopStyles.textMain(isDark)}`}>Обзор</h1>
       </div>
       <div className="flex gap-4">
         <button
           className={`px-6 py-3 rounded-full text-sm font-bold tracking-widest uppercase transition-all ${
             isDark ? 'bg-white text-black hover:bg-gray-200' : 'bg-[#1A1A1A] text-white hover:bg-gray-800'
           }`}
+          onClick={onStartAnalysis}
         >
-          + New Matter
+          + Новое дело
         </button>
       </div>
     </div>
 
-    {/* Top Grid: Hero Action & Stats */}
     <div className="grid grid-cols-12 gap-6 mb-10">
-      {/* Hero Banner */}
-      <div className="col-span-12 lg:col-span-8 relative overflow-hidden rounded-[24px] group cursor-pointer shadow-2xl">
+      <div className="col-span-12 lg:col-span-8 relative overflow-hidden rounded-[24px] group cursor-pointer shadow-2xl" onClick={onStartAnalysis}>
         <div className="absolute inset-0 bg-[#0F1115]">
-          <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-[#1a237e] opacity-20 blur-[120px] rounded-full"></div>
-          <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-[#C5A059] opacity-10 blur-[100px] rounded-full"></div>
+          <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-[#1a237e] opacity-20 blur-[120px] rounded-full" />
+          <div className="absolute bottom-0 left-0 w-[400px] h-[400px] bg-[#C5A059] opacity-10 blur-[100px] rounded-full" />
         </div>
-
         <div className="relative z-10 p-10 h-full flex flex-col justify-between min-h-[300px]">
           <div className="flex justify-between items-start">
             <div className="w-14 h-14 rounded-full border border-white/10 flex items-center justify-center bg-white/5 backdrop-blur-md">
               <Scale className="text-white" size={24} />
             </div>
             <div className="bg-white/10 backdrop-blur-md px-4 py-1.5 rounded-full border border-white/5">
-              <span className="text-xs font-bold text-white tracking-widest uppercase">AI Engine v2.4 Active</span>
+              <span className="text-xs font-bold text-white tracking-widest uppercase">AI Engine v2.4</span>
             </div>
           </div>
-
           <div className="max-w-xl">
-            <h2 className="text-3xl font-serif text-white mb-4">Contract Intelligence</h2>
+            <h2 className="text-3xl font-serif text-white mb-4">Интеллектуальный анализ</h2>
             <p className="text-white/60 mb-8 font-light text-lg">
-              Drag and drop your PDF here to initiate a deep scan for liability clauses, compliance risks, and non-standard deviations.
+              Перетащите PDF или DOCX, чтобы обнаружить неограниченную ответственность, срок действия и другие риски.
             </p>
             <div className="flex items-center gap-4 text-sm font-bold text-[#C5A059] uppercase tracking-widest group-hover:translate-x-2 transition-transform">
-              Start Analysis <ChevronRight size={16} />
+              Начать анализ <ChevronRight size={16} />
             </div>
           </div>
         </div>
       </div>
 
-      {/* Stats Column */}
       <div className="col-span-12 lg:col-span-4 flex flex-col gap-6">
-        <StatCard title="Active Cases" value="24" sub="+12%" icon={FolderOpen} isDark={isDark} />
-        <StatCard title="Hours Billed" value="142.5" sub="+12%" icon={Clock} isDark={isDark} />
+        <StatCardDesktop title="Активные дела" value="24" sub="+12%" icon={FolderOpen} isDark={isDark} />
+        <StatCardDesktop title="Отработано часов" value="142.5" sub="+12%" icon={Clock} isDark={isDark} />
       </div>
     </div>
 
-    {/* Recent Matters Table */}
-    <div className={`rounded-[24px] p-8 ${styles.card(isDark)}`}>
+    <div className={`rounded-[24px] p-8 ${desktopStyles.card(isDark)}`}>
       <div className="flex justify-between items-center mb-6">
-        <h3 className={`text-xl font-serif ${styles.textMain(isDark)}`}>Recent Matters</h3>
+        <h3 className={`text-xl font-serif ${desktopStyles.textMain(isDark)}`}>Последние дела</h3>
         <div className="flex gap-2">
-          <button className={`p-2 rounded-lg ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>
-            <Search size={18} className={styles.textSec(isDark)} />
+          <button className={`p-2 rounded-lg ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/5'}`} aria-label="Поиск">
+            <Search size={18} className={desktopStyles.textSec(isDark)} />
           </button>
-          <button className={`p-2 rounded-lg ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}>
-            <MoreHorizontal size={18} className={styles.textSec(isDark)} />
+          <button className={`p-2 rounded-lg ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/5'}`} aria-label="Дополнительно">
+            <MoreHorizontal size={18} className={desktopStyles.textSec(isDark)} />
           </button>
         </div>
       </div>
@@ -181,18 +702,18 @@ const DashboardView = ({ isDark }) => (
       <table className="w-full text-left border-collapse">
         <thead>
           <tr className={`text-xs uppercase tracking-widest border-b ${isDark ? 'text-gray-500 border-white/5' : 'text-gray-400 border-black/5'}`}>
-            <th className="pb-4 pl-4 font-normal">Client</th>
-            <th className="pb-4 font-normal">Matter</th>
-            <th className="pb-4 font-normal">Status</th>
-            <th className="pb-4 font-normal">Last Updated</th>
-            <th className="pb-4 font-normal text-right">Action</th>
+            <th className="pb-4 pl-4 font-normal">Клиент</th>
+            <th className="pb-4 font-normal">Дело</th>
+            <th className="pb-4 font-normal">Статус</th>
+            <th className="pb-4 font-normal">Обновлено</th>
+            <th className="pb-4 font-normal text-right">Действие</th>
           </tr>
         </thead>
         <tbody>
-          <TableRow client="TechCorp Inc." caseName="Merger Agreement v2" status="Review" date="2h ago" isDark={isDark} />
-          <TableRow client="Sterling Art" caseName="IP Rights Transfer" status="Active" date="Yesterday" isDark={isDark} />
-          <TableRow client="Nexus Logistics" caseName="Employment Dispute" status="Draft" date="Oct 10" isDark={isDark} />
-          <TableRow client="Private Estate" caseName="Trust Formation" status="Active" date="Oct 08" isDark={isDark} />
+          <TableRow client="TechCorp" caseName="Слияние компаний" status="Review" date="2 часа назад" isDark={isDark} />
+          <TableRow client="Sterling Art" caseName="Передача прав ИС" status="Active" date="Вчера" isDark={isDark} />
+          <TableRow client="Nexus Logistics" caseName="Трудовой спор" status="Draft" date="10 окт" isDark={isDark} />
+          <TableRow client="Private Estate" caseName="Формирование траста" status="Active" date="08 окт" isDark={isDark} />
         </tbody>
       </table>
     </div>
@@ -201,11 +722,10 @@ const DashboardView = ({ isDark }) => (
 
 const DocumentAnalysisView = ({ isDark }) => (
   <div className="h-screen flex flex-col animate-in slide-in-from-bottom-4">
-    {/* Toolbar */}
     <div className={`h-16 border-b flex items-center justify-between px-6 ${isDark ? 'border-white/5 bg-[#0B0C10]' : 'border-black/5 bg-white'}`}>
       <div className="flex items-center gap-4">
-        <h2 className={`font-serif text-lg ${styles.textMain(isDark)}`}>NDA_Draft_v0.4.pdf</h2>
-        <span className="px-2 py-0.5 rounded text-[10px] bg-gray-500/20 text-gray-500 font-bold uppercase">Read Only</span>
+        <h2 className={`font-serif text-lg ${desktopStyles.textMain(isDark)}`}>NDA_Draft_v0.4.pdf</h2>
+        <span className="px-2 py-0.5 rounded text-[10px] bg-gray-500/20 text-gray-500 font-bold uppercase">Только чтение</span>
       </div>
       <div className="flex items-center gap-3">
         <button
@@ -213,69 +733,64 @@ const DocumentAnalysisView = ({ isDark }) => (
             isDark ? 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20' : 'bg-amber-50 text-amber-600'
           }`}
         >
-          <AlertTriangle size={14} /> 2 Risks Found
+          <AlertTriangle size={14} /> 2 риска
         </button>
-        <div className={`h-6 w-[1px] ${isDark ? 'bg-white/10' : 'bg-black/10'}`}></div>
-        <button
-          className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider ${isDark ? 'bg-white text-black' : 'bg-black text-white'}`}
-        >
-          Export Report
+        <div className={`h-6 w-[1px] ${isDark ? 'bg-white/10' : 'bg-black/10'}`} />
+        <button className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider ${isDark ? 'bg-white text-black' : 'bg-black text-white'}`}>
+          Экспорт отчёта
         </button>
       </div>
     </div>
 
-    {/* Split View */}
     <div className="flex-1 flex overflow-hidden">
-      {/* Left: Document Preview (Mock) */}
       <div className={`flex-1 overflow-y-auto p-12 flex justify-center ${isDark ? 'bg-[#121212]' : 'bg-[#F2F0E9]'}`}>
         <div className={`w-[800px] min-h-[1000px] shadow-2xl p-16 relative ${isDark ? 'bg-[#1E1E1E] text-gray-300' : 'bg-white text-gray-800'}`}>
           <div className="mb-12 flex justify-between">
-            <div className="w-32 h-8 bg-current opacity-10 rounded"></div>
-            <div className="w-24 h-4 bg-current opacity-10 rounded"></div>
+            <div className="w-32 h-8 bg-current opacity-10 rounded" />
+            <div className="w-24 h-4 bg-current opacity-10 rounded" />
           </div>
           <div className="space-y-6 text-justify opacity-80 font-serif leading-loose text-sm">
-            <p>THIS AGREEMENT is made on the 14th day of December, 2025...</p>
-            <p>1. DEFINITIONS. "Confidential Information" means all information disclosed by Disclosing Party...</p>
+            <p>ДАННЫЙ ДОГОВОР заключён 14 декабря 2025 года...</p>
+            <p>1. ОПРЕДЕЛЕНИЯ. «Конфиденциальная информация» означает сведения, раскрытые Стороной...</p>
             <p className="bg-amber-500/20 -mx-2 px-2 py-1 rounded border-l-2 border-amber-500 relative group">
-              2. INDEMNIFICATION. Receiving Party agrees to indemnify Disclosing Party for any and all losses, unlimited in scope and duration...
+              2. ОТВЕТСТВЕННОСТЬ. Получающая сторона обязана возмещать все убытки без ограничений...
               <span className="absolute -right-32 top-0 text-amber-500 text-xs font-sans font-bold flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <ChevronLeft size={12} /> High Risk
+                <ChevronLeft size={12} /> Высокий риск
               </span>
             </p>
-            <p>3. TERM. This agreement shall remain in effect for a period of five (5) years...</p>
+            <p>3. СРОК. Соглашение действует в течение пяти (5) лет...</p>
             {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="space-y-3">
-                <div className="w-full h-3 bg-current opacity-10 rounded"></div>
-                <div className="w-[90%] h-3 bg-current opacity-10 rounded"></div>
-                <div className="w-[95%] h-3 bg-current opacity-10 rounded"></div>
+                <div className="w-full h-3 bg-current opacity-10 rounded" />
+                <div className="w-[90%] h-3 bg-current opacity-10 rounded" />
+                <div className="w-[95%] h-3 bg-current opacity-10 rounded" />
               </div>
             ))}
           </div>
         </div>
       </div>
 
-      {/* Right: AI Findings Panel */}
       <div className={`w-[400px] border-l flex flex-col ${isDark ? 'bg-[#0B0C10] border-white/5' : 'bg-white border-black/5'}`}>
         <div className="p-6 border-b border-white/5">
-          <h3 className={`font-serif text-xl mb-1 ${styles.textMain(isDark)}`}>AI Analysis</h3>
-          <p className={`text-xs ${styles.textSec(isDark)}`}>Powered by Juris-LLM v4</p>
+          <h3 className={`font-serif text-xl mb-1 ${desktopStyles.textMain(isDark)}`}>AI-анализ</h3>
+          <p className={`text-xs ${desktopStyles.textSec(isDark)}`}>Модель Juris-LLM v4</p>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           <div className={`p-5 rounded-xl border-l-2 border-amber-500 ${isDark ? 'bg-[#151515]' : 'bg-amber-50/50'}`}>
             <div className="flex items-center gap-2 mb-3">
               <AlertTriangle size={16} className="text-amber-500" />
-              <span className={`text-sm font-bold ${styles.textMain(isDark)}`}>Uncapped Liability</span>
+              <span className={`text-sm font-bold ${desktopStyles.textMain(isDark)}`}>Неограниченная ответственность</span>
             </div>
-            <p className={`text-sm mb-4 leading-relaxed ${styles.textSec(isDark)}`}>
-              Clause 2.1 contains unlimited indemnification language. Market standard for this transaction type typically caps liability at 2x contract value.
+            <p className={`text-sm mb-4 leading-relaxed ${desktopStyles.textSec(isDark)}`}>
+              Пункт 2.1 содержит неограниченное возмещение. Рекомендуем установить потолок в 2x стоимости договора.
             </p>
             <div className="space-y-2">
               <button className={`w-full py-2 rounded-lg text-xs font-bold border transition-colors ${isDark ? 'border-white/10 hover:bg-white/5 text-white' : 'border-black/10 hover:bg-black/5 text-black'}`}>
-                Auto-Draft Amendment
+                Подготовить поправку
               </button>
               <button className={`w-full py-2 rounded-lg text-xs font-bold transition-colors ${isDark ? 'text-gray-500 hover:text-white' : 'text-gray-400 hover:text-black'}`}>
-                Ignore
+                Игнорировать
               </button>
             </div>
           </div>
@@ -283,22 +798,18 @@ const DocumentAnalysisView = ({ isDark }) => (
           <div className={`p-5 rounded-xl border-l-2 border-emerald-500 ${isDark ? 'bg-[#151515]' : 'bg-gray-50'}`}>
             <div className="flex items-center gap-2 mb-3">
               <CheckCircle2 size={16} className="text-emerald-500" />
-              <span className={`text-sm font-bold ${styles.textMain(isDark)}`}>Jurisdiction Check</span>
+              <span className={`text-sm font-bold ${desktopStyles.textMain(isDark)}`}>Проверка юрисдикции</span>
             </div>
-            <p className={`text-sm leading-relaxed ${styles.textSec(isDark)}`}>
-              Governing law is set to NY State, consistent with previous agreements with this counterparty.
+            <p className={`text-sm leading-relaxed ${desktopStyles.textSec(isDark)}`}>
+              Применимое право — Нью-Йорк. Соответствует прошлым сделкам с этим контрагентом.
             </p>
           </div>
         </div>
 
         <div className={`p-4 border-t ${isDark ? 'border-white/5' : 'border-black/5'}`}>
           <div className={`flex items-center gap-3 p-3 rounded-xl ${isDark ? 'bg-white/5' : 'bg-black/5'}`}>
-            <SparklesIcon size={18} className="text-amber-500" />
-            <input
-              type="text"
-              placeholder="Ask about this contract..."
-              className="bg-transparent border-none outline-none text-sm w-full font-light"
-            />
+            <Sparkles size={18} className="text-amber-500" />
+            <input type="text" placeholder="Спросите об этом договоре..." className="bg-transparent border-none outline-none text-sm w-full font-light" />
           </div>
         </div>
       </div>
@@ -306,115 +817,85 @@ const DocumentAnalysisView = ({ isDark }) => (
   </div>
 );
 
-// Helper Icon for the chat
-const SparklesIcon = ({ className, size }) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-  >
-    <path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
-  </svg>
-);
-
-// --- DESKTOP LAYOUT ---
-
-export default function EliteJuristDesktop() {
+const DesktopExperience = ({ onSwitch }) => {
   const [isDark, setIsDark] = useState(true);
-  const [activeTab, setActiveTab] = useState('dashboard'); // dashboard | analysis
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [collapsed, setCollapsed] = useState(false);
 
   return (
-    <div className={`flex h-screen w-full font-sans transition-colors duration-500 ${styles.bg(isDark)}`}>
-      {/* SIDEBAR */}
+    <div className={`flex h-screen w-full font-sans transition-colors duration-500 ${desktopStyles.bg(isDark)}`}>
       <aside
-        className={`
-        flex flex-col h-full transition-all duration-300 z-50
-        ${collapsed ? 'w-20' : 'w-[280px]'}
-        ${styles.sidebar(isDark)}
-      `}
+        className={`flex flex-col h-full transition-all duration-300 z-50 ${collapsed ? 'w-20' : 'w-[280px]'} ${desktopStyles.sidebar(isDark)}`}
       >
-        {/* Logo Area */}
         <div className="h-24 flex items-center px-6 justify-between">
           <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 min-w-[40px] rounded-full flex items-center justify-center border transition-colors ${isDark ? 'border-white/20 bg-white/5' : 'border-black/10 bg-white'}`}>
-              <span className={`font-serif font-bold text-xl ${styles.textMain(isDark)}`}>J.</span>
+            <div className={`w-10 h-10 min-w-[40px] rounded-full flex items-center justify-center border transition-colors ${
+              isDark ? 'border-white/20 bg-white/5' : 'border-black/10 bg-white'
+            }`}>
+              <span className={`font-serif font-bold text-xl ${desktopStyles.textMain(isDark)}`}>J.</span>
             </div>
-            {!collapsed && <span className={`font-serif font-bold text-lg tracking-tight ${styles.textMain(isDark)} animate-in fade-in`}>Juris</span>}
+            {!collapsed && <span className={`font-serif font-bold text-lg tracking-tight ${desktopStyles.textMain(isDark)} animate-in`}>Juris</span>}
           </div>
           <button
             onClick={() => setCollapsed((prev) => !prev)}
             className={`p-2 rounded-lg ${isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-black'}`}
-            aria-label="Toggle sidebar"
+            aria-label="Свернуть меню"
           >
             {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
           </button>
         </div>
 
-        {/* Navigation */}
         <nav className="flex-1 px-4 py-6">
-          <div className="mb-2 px-2 text-[10px] font-bold uppercase tracking-widest opacity-40">{!collapsed ? 'Main Menu' : '•'}</div>
-          <SidebarItem icon={LayoutDashboard} label="Dashboard" active={activeTab === 'dashboard'} collapsed={collapsed} isDark={isDark} onClick={() => setActiveTab('dashboard')} />
-          <SidebarItem icon={FileText} label="Document Analysis" active={activeTab === 'analysis'} collapsed={collapsed} isDark={isDark} onClick={() => setActiveTab('analysis')} />
-          <SidebarItem icon={FolderOpen} label="Case Archive" active={false} collapsed={collapsed} isDark={isDark} />
-          <SidebarItem icon={PieChart} label="Analytics" active={false} collapsed={collapsed} isDark={isDark} />
+          <div className="mb-2 px-2 text-[10px] font-bold uppercase tracking-widest opacity-40">{!collapsed ? 'Главное меню' : '•'}</div>
+          <SidebarItem icon={LayoutDashboard} label="Дашборд" active={activeTab === 'dashboard'} collapsed={collapsed} isDark={isDark} onClick={() => setActiveTab('dashboard')} />
+          <SidebarItem icon={FileText} label="Анализ договора" active={activeTab === 'analysis'} collapsed={collapsed} isDark={isDark} onClick={() => setActiveTab('analysis')} />
+          <SidebarItem icon={FolderOpen} label="Архив дел" active={false} collapsed={collapsed} isDark={isDark} />
+          <SidebarItem icon={PieChart} label="Аналитика" active={false} collapsed={collapsed} isDark={isDark} />
 
-          <div className="mt-8 mb-2 px-2 text-[10px] font-bold uppercase tracking-widest opacity-40">{!collapsed ? 'Settings' : '•'}</div>
-          <SidebarItem icon={Settings} label="Configuration" active={false} collapsed={collapsed} isDark={isDark} />
+          <div className="mt-8 mb-2 px-2 text-[10px] font-bold uppercase tracking-widest opacity-40">{!collapsed ? 'Настройки' : '•'}</div>
+          <SidebarItem icon={Settings} label="Конфигурация" active={false} collapsed={collapsed} isDark={isDark} />
         </nav>
 
-        {/* Sidebar Footer */}
         <div className="p-4 border-t border-white/5 flex gap-2">
           <button
             onClick={() => setIsDark((prev) => !prev)}
             className={`flex-1 flex items-center justify-center p-3 rounded-xl transition-colors ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}
-            aria-label="Toggle theme"
+            aria-label="Смена темы"
           >
             <Zap size={20} className={isDark ? 'text-white' : 'text-black'} />
           </button>
           <button
-            onClick={() => setCollapsed((prev) => !prev)}
+            onClick={onSwitch}
             className={`p-3 rounded-xl transition-colors ${isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-black'}`}
-            aria-label="Collapse sidebar"
+            aria-label="Мобильная версия"
           >
-            {collapsed ? <Menu size={18} /> : <X size={18} />}
+            <LayoutDashboard size={18} />
           </button>
         </div>
       </aside>
 
-      {/* MAIN CONTENT AREA */}
       <main className="flex-1 overflow-auto relative">
         <div className="fixed inset-0 pointer-events-none">
-          <div className={`absolute top-0 right-0 w-[50%] h-[50%] rounded-full blur-[150px] opacity-[0.03] ${isDark ? 'bg-white' : 'bg-black'}`}></div>
+          <div className={`absolute top-0 right-0 w-[50%] h-[50%] rounded-full blur-[150px] opacity-[0.03] ${isDark ? 'bg-white' : 'bg-black'}`} />
         </div>
-
-        {activeTab === 'dashboard' && <DashboardView isDark={isDark} />}
+        {activeTab === 'dashboard' && <DashboardView isDark={isDark} onStartAnalysis={() => setActiveTab('analysis')} />}
         {activeTab === 'analysis' && <DocumentAnalysisView isDark={isDark} />}
       </main>
+    </div>
+  );
+};
 
-      <style>{`
-        .no-scrollbar::-webkit-scrollbar {
-          display: none;
-        }
-        .no-scrollbar {
-          -ms-overflow-style: none;
-          scrollbar-width: none;
-        }
-        .animate-in {
-          animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(20px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-      `}</style>
+// --- ОСНОВНОЙ ПЕРЕКЛЮЧАТЕЛЬ ---
+export default function App() {
+  const [mode, setMode] = useState('desktop');
+
+  return (
+    <div className="min-h-screen">
+      {mode === 'desktop' ? (
+        <DesktopExperience onSwitch={() => setMode('mobile')} />
+      ) : (
+        <MobileExperience onSwitch={() => setMode('desktop')} />
+      )}
     </div>
   );
 }
