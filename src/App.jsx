@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Scale,
   ShieldCheck,
@@ -6,7 +6,10 @@ import {
   Clock,
   Search,
   Bell,
+  ChevronRight,
+  ChevronLeft,
   Menu,
+  X,
   Fingerprint,
   Zap,
   MoreVertical,
@@ -14,26 +17,11 @@ import {
   Bookmark,
   Sparkles,
   AlertOctagon,
+  Check,
   Play,
-  Settings,
-  FolderLock,
-  Upload,
-  DownloadCloud,
-  CheckCircle2,
-  Cpu,
-  Shield,
-  Plus,
-  X,
 } from 'lucide-react';
 
-const palette = {
-  bg: (dark) => (dark ? 'bg-[#050505]' : 'bg-[#F8F6F1]'),
-  textMain: (dark) => (dark ? 'text-white' : 'text-[#121212]'),
-  textSubtle: (dark) => (dark ? 'text-white/70' : 'text-[#3f3f3f]'),
-  panel: (dark) => (dark ? 'bg-[#0E0E0E]/80 border-white/5' : 'bg-white border-black/5'),
-  panelHover: (dark) => (dark ? 'hover:border-white/10' : 'hover:border-black/10'),
-  accent: 'text-[#C5A059]',
-};
+// --- ТЕМА ---
 
 const useTheme = () => {
   const [isDark, setIsDark] = useState(true);
@@ -41,604 +29,368 @@ const useTheme = () => {
   return { isDark, toggle };
 };
 
-const Badge = ({ label, tone = 'default' }) => {
-  const toneStyles = {
-    default: 'text-white/70 bg-white/5 border-white/10',
-    amber: 'text-amber-200 bg-amber-500/10 border-amber-400/30',
-    green: 'text-emerald-200 bg-emerald-500/10 border-emerald-400/30',
-  };
-  return (
-    <span
-      className={`px-3 py-1 rounded-full text-xs font-semibold uppercase tracking-[0.2em] border ${toneStyles[tone]}`}
-    >
-      {label}
-    </span>
-  );
+// Палитра "Old Money"
+const styles = {
+  bg: (dark) => (dark ? 'bg-[#050505]' : 'bg-[#F2F0E9]'),
+  textMain: (dark) => (dark ? 'text-[#EAEAEA]' : 'text-[#1A1A1A]'),
+  textSec: (dark) => (dark ? 'text-[#888888]' : 'text-[#666660]'),
+  glass: (dark) =>
+    dark
+      ? 'bg-[#1A1A1A]/60 backdrop-blur-xl border border-white/5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.05)]'
+      : 'bg-[#FFFFFF]/70 backdrop-blur-xl border border-black/5 shadow-[0_4px_20px_-2px_rgba(0,0,0,0.05)]',
+  goldText: 'text-[#C5A059]',
+  goldBg: 'bg-[#C5A059]',
+  card: (dark) =>
+    dark
+      ? 'bg-[#121212] border border-white/5 shadow-2xl shadow-black/50'
+      : 'bg-white border border-[#E5E0D6] shadow-[0_2px_24px_-6px_rgba(0,0,0,0.04)]',
 };
 
-const Surface = ({ isDark, children, className = '', onClick }) => (
+// --- КОМПОНЕНТЫ ---
+
+const SerifHeader = ({ children, className = '', dark }) => (
+  <h2 className={`font-serif tracking-tight ${className} ${dark ? 'text-white' : 'text-black'}`}>
+    {children}
+  </h2>
+);
+
+const IconButton = ({ icon: Icon, onClick, isDark, label }) => (
+  <button
+    onClick={onClick}
+    className={`p-3 rounded-full transition-all duration-300 group ${
+      isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-black'
+    }`}
+    aria-label={label}
+  >
+    <Icon strokeWidth={1.5} size={22} className="opacity-70 group-hover:opacity-100 transition-opacity" />
+  </button>
+);
+
+const PremiumCard = ({ children, className, isDark, onClick }) => (
   <div
     onClick={onClick}
-    className={`relative rounded-2xl border transition-all duration-300 ${
-      palette.panel(isDark)
-    } ${palette.panelHover(isDark)} ${className}`}
+    className={`
+      relative overflow-hidden rounded-[20px] p-6 transition-all duration-500 ease-out
+      hover:scale-[1.01] cursor-pointer group
+      ${styles.card(isDark)} ${className}
+    `}
   >
     {children}
   </div>
 );
 
-const StatCard = ({ icon: Icon, label, value, trend, isDark }) => (
-  <Surface isDark={isDark} className="p-4 flex items-center gap-4 min-h-[110px]">
-    <div className={`${isDark ? 'bg-white/5' : 'bg-black/5'} p-3 rounded-xl`}>
-      <Icon className={palette.accent} size={24} strokeWidth={1.5} />
-    </div>
-    <div className="flex-1">
-      <p className={`text-sm uppercase tracking-[0.2em] ${palette.textSubtle(isDark)}`}>{label}</p>
-      <div className="flex items-baseline gap-3">
-        <span className={`text-2xl font-semibold ${palette.textMain(isDark)}`}>{value}</span>
-        <span className="text-xs text-emerald-400">{trend}</span>
-      </div>
-    </div>
-    <ArrowUpRight className={`opacity-30 ${palette.textMain(isDark)}`} size={18} />
-  </Surface>
-);
+// --- ЭКРАНЫ ---
 
-const DocumentRow = ({ title, type, status, updated, isDark }) => (
-  <Surface
-    isDark={isDark}
-    className="p-4 flex items-center gap-4 hover:-translate-y-[2px] cursor-pointer"
-  >
-    <div className={`${isDark ? 'bg-white/5' : 'bg-black/5'} rounded-xl p-3`}> 
-      <FileSignature className={palette.accent} size={20} />
-    </div>
-    <div className="flex-1">
-      <p className={`font-medium ${palette.textMain(isDark)}`}>{title}</p>
-      <p className={`text-sm ${palette.textSubtle(isDark)}`}>{type}</p>
-    </div>
-    <Badge label={status} tone={status === 'Critical' ? 'amber' : 'green'} />
-    <p className={`text-xs ${palette.textSubtle(isDark)}`}>{updated}</p>
-    <MoreVertical className={`opacity-40 ${palette.textMain(isDark)}`} size={16} />
-  </Surface>
-);
-
-const TimelineItem = ({ icon: Icon, label, time, detail, isDark }) => (
-  <div className="flex gap-3">
-    <div className={`${isDark ? 'bg-white/5' : 'bg-black/5'} w-10 h-10 rounded-full flex items-center justify-center`}>
-      <Icon className={palette.accent} size={18} />
-    </div>
-    <div className="flex-1 border-b border-white/5 pb-3">
-      <p className={`text-sm font-semibold ${palette.textMain(isDark)}`}>{label}</p>
-      <p className={`text-xs ${palette.textSubtle(isDark)}`}>{detail}</p>
-    </div>
-    <span className={`text-xs ${palette.textSubtle(isDark)}`}>{time}</span>
-  </div>
-);
-
-const DesktopHero = ({ isDark, onNavigate }) => (
-  <Surface
-    isDark={isDark}
-    onClick={() => onNavigate('scan')}
-    className="p-6 sm:p-8 overflow-hidden cursor-pointer group min-h-[260px] flex flex-col xl:flex-row gap-6"
-  >
-    <div className="absolute inset-0 bg-gradient-to-r from-[#111] via-[#0b0b0b] to-transparent" />
-    <div className="absolute inset-y-0 right-0 w-1/2 bg-[radial-gradient(circle_at_40%_40%,rgba(197,160,89,0.18),rgba(5,5,5,0))]" />
-    <div className="relative flex-1 space-y-4">
-      <Badge label="AI Analysis 2.0" tone="amber" />
-      <h1 className={`font-serif text-3xl sm:text-4xl leading-snug ${palette.textMain(isDark)}`}>
-        Elite contract review built for desktop counsel.
-      </h1>
-      <p className={`${palette.textSubtle(isDark)} max-w-2xl text-sm sm:text-base`}>
-        Upload, triage, and co-author amendments without leaving your workflow. Precision risk detection meets elegant control.
+const Dashboard = ({ isDark, onNavigate }) => (
+  <div className="pt-24 px-6 pb-32 animate-in fade-in duration-700">
+    <div className="mb-8">
+      <p className={`text-xs font-bold tracking-[0.2em] uppercase mb-2 ${styles.goldText}`}>
+        Среда, 12 окт
       </p>
-      <div className="flex flex-wrap gap-3">
-        <button
-          className={`px-5 py-3 rounded-xl font-semibold flex items-center gap-2 shadow-lg shadow-black/30 ${
-            isDark ? 'bg-white text-black' : 'bg-black text-white'
-          }`}
-        >
-          Start a Scan <ArrowUpRight size={18} />
-        </button>
-        <button
-          className={`px-5 py-3 rounded-xl border ${
-            isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'
-          } flex items-center gap-2`}
-        >
-          Watch demo <Play size={16} />
-        </button>
+      <SerifHeader dark={isDark} className="text-4xl">
+        Доброе утро,<br />Советник.
+      </SerifHeader>
+    </div>
+
+    <div
+      onClick={() => onNavigate('scan')}
+      className="relative w-full aspect-[16/9] rounded-[24px] overflow-hidden cursor-pointer group shadow-2xl shadow-black/20"
+    >
+      <div className="absolute inset-0 bg-[#0F1115]">
+        <div className="absolute top-0 right-0 w-[300px] h-[300px] bg-[#1a237e] opacity-20 blur-[100px] rounded-full group-hover:opacity-30 transition-opacity duration-700"></div>
+        <div className="absolute bottom-0 left-0 w-[200px] h-[200px] bg-[#C5A059] opacity-10 blur-[80px] rounded-full"></div>
+      </div>
+
+      <div className="absolute inset-0 p-8 flex flex-col justify-between z-10">
+        <div className="flex justify-between items-start">
+          <div className="w-12 h-12 rounded-full border border-white/10 flex items-center justify-center bg-white/5 backdrop-blur-md">
+            <Scale className="text-white" size={20} strokeWidth={1.5} />
+          </div>
+          <span className="px-3 py-1 rounded-full border border-white/10 bg-black/20 backdrop-blur-md text-[10px] font-bold text-white tracking-widest uppercase">
+            AI Анализ 2.0
+          </span>
+        </div>
+
+        <div>
+          <h3 className="text-2xl font-serif text-white mb-2">Новый скан контракта</h3>
+          <p className="text-white/50 text-sm font-light max-w-[80%]">Загрузите PDF или DOCX, чтобы найти риски и несоответствия.</p>
+        </div>
+
+        <div className="absolute right-6 bottom-6 opacity-0 group-hover:opacity-100 transition-opacity duration-500 transform translate-x-2 group-hover:translate-x-0">
+          <ArrowUpRight className="text-white" />
+        </div>
       </div>
     </div>
-    <div className="relative w-full xl:w-[360px]">
-      <Surface
-        isDark={isDark}
-        className="w-full p-5 space-y-3 border border-white/10 bg-gradient-to-b from-white/5 to-transparent"
-      >
-        <div className="flex justify-between items-center">
-          <p className={`text-sm ${palette.textSubtle(isDark)}`}>NDA_Draft_v0.4.pdf</p>
-          <Shield className={palette.accent} size={18} />
-        </div>
-        <div className={`h-2 rounded-full overflow-hidden ${isDark ? 'bg-white/5' : 'bg-black/10'}`}>
-          <div className="h-full bg-[#C5A059] w-4/5" />
-        </div>
-        <div className={`text-sm ${palette.textMain(isDark)}`}>
-          2 potential liabilities detected
-        </div>
-        <div className="space-y-2">
-          {["Unlimited indemnity", "Missing audit carve-out"].map((item) => (
-            <div key={item} className={`flex items-center justify-between text-xs ${palette.textSubtle(isDark)}`}>
-              <span>{item}</span>
-              <CheckCircle2 className="text-emerald-400" size={16} />
+
+    <div className="mt-12">
+      <div className="flex justify-between items-end mb-6 border-b border-gray-500/10 pb-2">
+        <h3 className={`font-serif text-xl ${styles.textMain(isDark)}`}>Недавние дела</h3>
+        <button className={`text-xs tracking-widest uppercase font-bold hover:opacity-70 transition-opacity ${styles.textSec(isDark)}`}>
+          Архив
+        </button>
+      </div>
+
+      <div className="space-y-4">
+        {[
+          { title: 'Слияние: TechCorp', date: '2 часа назад', status: 'Требует внимания', icon: AlertOctagon, color: 'text-amber-500' },
+          { title: 'Передача IP прав', date: 'Вчера', status: 'Ок', icon: Check, color: 'text-emerald-500' },
+          { title: 'Трудовой контракт #402', date: '10 окт', status: 'Черновик', icon: FileSignature, color: 'text-gray-400' },
+        ].map((item, i) => (
+          <PremiumCard key={i} isDark={isDark} className="!p-5 flex items-center gap-5">
+            <div className={`p-3 rounded-full ${isDark ? 'bg-white/5' : 'bg-black/5'}`}>
+              <item.icon className={item.color} size={20} strokeWidth={1.5} />
             </div>
-          ))}
-        </div>
-      </Surface>
+            <div className="flex-1">
+              <h4 className={`font-medium text-sm mb-1 ${styles.textMain(isDark)}`}>{item.title}</h4>
+              <p className={`text-xs ${styles.textSec(isDark)}`}>
+                {item.date} • {item.status}
+              </p>
+            </div>
+            <ChevronRight size={16} className={`opacity-30 ${styles.textMain(isDark)}`} />
+          </PremiumCard>
+        ))}
+      </div>
     </div>
-  </Surface>
+  </div>
 );
 
 const ScanView = ({ isDark, onBack }) => {
   const [scanning, setScanning] = useState(false);
-  const [complete, setComplete] = useState(false);
+  const [result, setResult] = useState(false);
 
   useEffect(() => {
-    let timer;
     if (scanning) {
-      timer = setTimeout(() => {
+      const timer = setTimeout(() => {
         setScanning(false);
-        setComplete(true);
-      }, 2800);
+        setResult(true);
+      }, 2500);
+      return () => clearTimeout(timer);
     }
-    return () => clearTimeout(timer);
+    return undefined;
   }, [scanning]);
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
+  if (result) {
+    return (
+      <div className="h-full pt-24 px-6 animate-in slide-in-from-bottom-8 duration-700">
+        <div className="flex justify-between items-center mb-8">
           <button
             onClick={onBack}
-            className={`px-3 py-2 rounded-lg border text-sm ${isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'}`}
+            className={`flex items-center gap-2 text-sm font-bold tracking-widest uppercase opacity-60 hover:opacity-100 ${styles.textMain(isDark)}`}
           >
-            Back to desk
+            <ChevronLeft size={16} /> Назад
           </button>
-          <Badge label={complete ? 'Report ready' : scanning ? 'Scanning' : 'Staged'} tone={complete ? 'green' : 'amber'} />
+          <div className="flex gap-2">
+            <div className="w-2 h-2 rounded-full bg-amber-500 animate-pulse"></div>
+            <span className="text-xs font-bold text-amber-500 uppercase tracking-widest">Найдено 2 проблемы</span>
+          </div>
         </div>
-        <div className={`flex gap-2 text-xs items-center ${palette.textSubtle(isDark)}`}>
-          <Sparkles size={16} className={palette.accent} />
-          AI cross-checking CFR & GDPR corpus
+
+        <div className={`rounded-t-[32px] min-h-screen p-8 shadow-[0_-10px_40px_-10px_rgba(0,0,0,0.1)] ${isDark ? 'bg-[#151515]' : 'bg-white'}`}>
+          <div className="w-full flex justify-center mb-8">
+            <div className="w-12 h-1.5 rounded-full bg-gray-500/20"></div>
+          </div>
+
+          <h2 className={`font-serif text-3xl mb-2 ${styles.textMain(isDark)}`}>Отчет анализа</h2>
+          <p className={`text-sm mb-10 ${styles.textSec(isDark)}`}>
+            Документ: <span className="underline decoration-1 underline-offset-4">NDA_Draft_v0.4.pdf</span>
+          </p>
+
+          <div className="relative pl-6 border-l-2 border-amber-500/50 mb-10 group cursor-pointer">
+            <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-full border-4 ${isDark ? 'bg-[#151515] border-amber-500' : 'bg-white border-amber-500'}`}></div>
+
+            <h3 className={`text-lg font-serif mb-2 ${styles.textMain(isDark)} group-hover:text-amber-500 transition-colors`}>
+              Статья об индемнификации
+            </h3>
+            <p className={`text-sm leading-relaxed ${styles.textSec(isDark)}`}>
+              Текущее формулировка перекладывает <span className="text-amber-500 font-medium">неограниченную ответственность</span> на раскрывающую сторону. Это отклонение от практики (потолок 2x гонорара).
+            </p>
+
+            <div className={`mt-4 p-4 rounded-xl text-sm italic font-serif ${isDark ? 'bg-amber-500/10 text-amber-200' : 'bg-amber-50 text-amber-800'}`}>
+              «Рекомендация: ограничить ответственность суммой контракта».
+            </div>
+          </div>
+
+          <div className="relative pl-6 border-l-2 border-emerald-500/20 mb-8 opacity-60 hover:opacity-100 transition-opacity">
+            <div className={`absolute -left-[9px] top-0 w-4 h-4 rounded-full border-4 ${isDark ? 'bg-[#151515] border-emerald-500' : 'bg-white border-emerald-500'}`}></div>
+            <h3 className={`text-lg font-serif mb-2 ${styles.textMain(isDark)}`}>Период конфиденциальности</h3>
+            <p className={`text-sm leading-relaxed ${styles.textSec(isDark)}`}>Срок 5 лет. Соответствует стандарту.</p>
+          </div>
+
+          <button
+            className={`w-full py-4 mt-4 rounded-xl font-bold text-xs tracking-[0.2em] uppercase transition-all hover:scale-[1.02] ${
+              isDark ? 'bg-white text-black hover:bg-gray-200' : 'bg-black text-white hover:bg-gray-800'
+            }`}
+          >
+            Сгенерировать дополнение
+          </button>
         </div>
       </div>
+    );
+  }
 
-      <div className="grid xl:grid-cols-3 gap-6">
-        <Surface isDark={isDark} className="xl:col-span-2 p-6 space-y-5">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className={`font-serif text-2xl ${palette.textMain(isDark)}`}>Document intake</h3>
-              <p className={`${palette.textSubtle(isDark)} text-sm`}>Drop files or pull from DMS.</p>
-            </div>
-            <button
-              onClick={() => setScanning(true)}
-              className="px-4 py-2 rounded-lg bg-white text-black font-semibold flex items-center gap-2"
-            >
-              {scanning ? 'Analyzing' : 'Start scan'} <Zap size={16} />
-            </button>
+  return (
+    <div className="h-full flex flex-col items-center justify-center p-6 relative overflow-hidden">
+      <div
+        className={`relative w-64 h-[360px] rounded-[4px] border transition-all duration-700 ${
+          scanning ? 'border-transparent scale-105' : 'border-gray-500/30'
+        } flex items-center justify-center overflow-hidden`}
+      >
+        <div
+          className={`absolute inset-0 p-8 space-y-4 transition-opacity duration-500 ${
+            scanning ? 'opacity-40' : 'opacity-100'
+          } ${isDark ? 'bg-[#121212]' : 'bg-white'}`}
+        >
+          <div className="w-1/3 h-2 bg-gray-500/20 mb-8"></div>
+          {[1, 2, 3, 4, 5, 6, 7].map((i) => (
+            <div key={i} className="w-full h-1.5 bg-gray-500/10 rounded-full"></div>
+          ))}
+          <div className="w-2/3 h-1.5 bg-gray-500/10 rounded-full"></div>
+        </div>
+
+        {scanning && (
+          <div className="absolute inset-0 z-20 animate-scan">
+            <div className="h-full w-full bg-gradient-to-b from-transparent via-amber-500/20 to-transparent translate-y-[-100%] animate-scan-beam"></div>
+            <div className="absolute top-1/2 left-0 right-0 h-[1px] bg-amber-400 shadow-[0_0_20px_rgba(251,191,36,0.8)]"></div>
           </div>
+        )}
 
+        {!scanning && (
           <div
-            className={`border-2 border-dashed rounded-xl p-10 flex flex-col items-center justify-center gap-4 ${
-              isDark ? 'border-white/10 bg-white/5' : 'border-black/10 bg-black/5'
-            } ${scanning ? 'animate-pulse' : ''}`}
+            onClick={() => setScanning(true)}
+            className="absolute inset-0 z-30 flex items-center justify-center cursor-pointer group bg-black/5 hover:bg-black/10 transition-colors"
           >
-            <Upload size={36} className={palette.accent} />
-            <div className="text-center space-y-1">
-              <p className={`text-lg font-medium ${palette.textMain(isDark)}`}>Drag & drop contracts</p>
-              <p className={`${palette.textSubtle(isDark)} text-sm`}>PDF, DOCX, TXT up to 50 MB</p>
-            </div>
-            <div className="flex gap-3">
-              <button className={`px-4 py-2 rounded-lg border ${isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'}`}>
-                Browse desktop
-              </button>
-              <button className="px-4 py-2 rounded-lg bg-black text-white flex items-center gap-2">
-                <DownloadCloud size={16} /> Connect cloud drive
-              </button>
+            <div
+              className={`w-20 h-20 rounded-full flex items-center justify-center backdrop-blur-md transition-transform group-hover:scale-110 ${
+                isDark ? 'bg-white/10 text-white' : 'bg-black/80 text-white'
+              }`}
+            >
+              <Search size={24} strokeWidth={1.5} />
             </div>
           </div>
+        )}
+      </div>
 
-          {complete && (
-            <Surface isDark={isDark} className="p-4 grid md:grid-cols-3 gap-3">
-              {["Indemnity", "Data residency", "Audit"].map((item, idx) => (
-                <div key={item} className="p-3 rounded-xl bg-black/40 border border-white/5">
-                  <p className={`text-xs uppercase tracking-[0.2em] ${palette.textSubtle(isDark)}`}>
-                    Risk {idx + 1}
-                  </p>
-                  <p className={`text-lg font-serif ${palette.textMain(isDark)}`}>{item}</p>
-                  <p className="text-xs text-amber-300 mt-1 flex items-center gap-1">
-                    <AlertOctagon size={14} /> Review clause
-                  </p>
-                </div>
-              ))}
-            </Surface>
-          )}
-        </Surface>
-
-        <Surface isDark={isDark} className="p-6 space-y-5">
-          <div className="flex items-center justify-between">
-            <h4 className={`font-serif text-xl ${palette.textMain(isDark)}`}>Live activity</h4>
-            <Bell className={palette.accent} size={18} />
-          </div>
-          <div className="space-y-4">
-            <TimelineItem
-              icon={Sparkles}
-              label="Clause intelligence"
-              detail="Model aligning with market indemnity caps"
-              time={scanning ? 'running' : 'just now'}
-              isDark={isDark}
-            />
-            <TimelineItem
-              icon={ShieldCheck}
-              label="Regulatory sweep"
-              detail="GDPR/CCPA mapping complete"
-              time="1m"
-              isDark={isDark}
-            />
-            <TimelineItem
-              icon={FileSignature}
-              label="Draft amendment"
-              detail="Redlines ready for counsel review"
-              time="3m"
-              isDark={isDark}
-            />
-          </div>
-          <div className="pt-2">
-            <button className="w-full py-3 rounded-xl bg-white text-black font-semibold flex items-center justify-center gap-2">
-              Generate amendment package
-              <ArrowUpRight size={16} />
-            </button>
-          </div>
-        </Surface>
+      <div className="mt-12 text-center space-y-2">
+        <h2 className={`font-serif text-2xl ${styles.textMain(isDark)}`}>
+          {scanning ? 'Анализ прецедентов…' : 'Загрузите документ'}
+        </h2>
+        <p className={`text-sm font-light ${styles.textSec(isDark)}`}>ИИ сверит с Гражданским кодексом</p>
       </div>
     </div>
   );
 };
 
-const Dashboard = ({ isDark, onNavigate }) => (
-  <div className="space-y-6">
-    <div className="flex flex-col xl:flex-row xl:items-end xl:justify-between gap-4">
-      <div>
-        <p className={`text-xs uppercase tracking-[0.25em] ${palette.accent}`}>Wednesday, 12 Oct</p>
-        <h2 className={`font-serif text-4xl ${palette.textMain(isDark)}`}>Welcome back, Counselor.</h2>
-        <p className={`${palette.textSubtle(isDark)} mt-1`}>
-          Continue where you left off or launch a new desktop-grade analysis.
-        </p>
-      </div>
-      <div className="flex gap-2">
-        <button className="px-4 py-2 rounded-lg bg-white text-black font-semibold flex items-center gap-2">
-          <Sparkles size={16} /> New AI workspace
-        </button>
-        <button className={`px-4 py-2 rounded-lg border ${isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'}`}>
-          <Plus size={16} /> Manual file
-        </button>
-      </div>
-    </div>
+// --- НАВИГАЦИЯ ---
 
-    <DesktopHero isDark={isDark} onNavigate={onNavigate} />
-
-    <div className="grid xl:grid-cols-4 gap-6">
-      <StatCard icon={ShieldCheck} label="Compliant clauses" value="94%" trend="+3.2%" isDark={isDark} />
-      <StatCard icon={Scale} label="Risk alerts" value="08" trend="-2 this week" isDark={isDark} />
-      <StatCard icon={Clock} label="Avg review time" value="6m 12s" trend="-14%" isDark={isDark} />
-      <StatCard icon={Cpu} label="Model version" value="v2.4" trend="Stable" isDark={isDark} />
-    </div>
-
-    <div className="grid xl:grid-cols-3 gap-6">
-      <Surface isDark={isDark} className="xl:col-span-2 p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className={`font-serif text-2xl ${palette.textMain(isDark)}`}>Recent matters</h3>
-            <p className={`${palette.textSubtle(isDark)} text-sm`}>Desktop-optimized view for your active contracts</p>
-          </div>
-          <button className="text-sm text-amber-300 flex items-center gap-2">
-            View archive <ArrowUpRight size={16} />
-          </button>
-        </div>
-        <div className="space-y-3">
-          <DocumentRow
-            title="Merger Agreement: TechCorp"
-            type="M&A • 112 pages"
-            status="Critical"
-            updated="2h ago"
-            isDark={isDark}
-          />
-          <DocumentRow
-            title="IP Rights Transfer"
-            type="IP • 26 pages"
-            status="Cleared"
-            updated="Yesterday"
-            isDark={isDark}
-          />
-          <DocumentRow
-            title="Employment Contract #402"
-            type="HR • 14 pages"
-            status="Cleared"
-            updated="Oct 10"
-            isDark={isDark}
-          />
-        </div>
-      </Surface>
-      <Surface isDark={isDark} className="p-6 space-y-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className={`font-serif text-xl ${palette.textMain(isDark)}`}>Upcoming actions</h3>
-            <p className={`${palette.textSubtle(isDark)} text-sm`}>Desktop notifications muted</p>
-          </div>
-          <Bell className={palette.accent} size={18} />
-        </div>
-        <div className="space-y-3">
-          <TimelineItem
-            icon={AlertOctagon}
-            label="Review indemnity limits"
-            detail="NDA_Draft_v0.4.pdf"
-            time="Today"
-            isDark={isDark}
-          />
-          <TimelineItem
-            icon={Bookmark}
-            label="Flagged jurisdiction"
-            detail="Data residency addendum"
-            time="Tomorrow"
-            isDark={isDark}
-          />
-          <TimelineItem
-            icon={ShieldCheck}
-            label="Compliance audit"
-            detail="SOC2 evidence refresh"
-            time="Friday"
-            isDark={isDark}
-          />
-        </div>
-      </Surface>
-    </div>
-  </div>
-);
-
-const Sidebar = ({ isDark }) => (
-  <div
-    className={`hidden lg:flex flex-col gap-4 w-[280px] px-4 py-6 sticky top-0 h-screen ${palette.bg(isDark)}`}
-  >
-    <div className="flex items-center gap-3 px-3">
-      <div className={`w-10 h-10 rounded-full flex items-center justify-center border ${isDark ? 'border-white/10 bg-white/5' : 'border-black/10 bg-white/60'}`}>
-        <span className={`font-serif font-bold text-xl ${palette.textMain(isDark)}`}>J.</span>
-      </div>
-      <div>
-        <p className={`text-xs uppercase tracking-[0.2em] ${palette.textSubtle(isDark)}`}>DocSign</p>
-        <p className={`font-semibold ${palette.textMain(isDark)}`}>Elite Jurist</p>
-      </div>
-    </div>
-    <Surface isDark={isDark} className="p-4 space-y-3">
+const LuxuryNav = ({ isDark }) => (
+  <div className="fixed bottom-0 left-0 right-0 p-6 z-50 pointer-events-none">
+    <div
+      className={`mx-auto max-w-[280px] h-[64px] rounded-full px-2 flex justify-between items-center pointer-events-auto ${styles.glass(isDark)}`}
+    >
       {[
-        { icon: Scale, label: 'Workspace' },
-        { icon: Search, label: 'Search' },
-        { icon: Bookmark, label: 'Bookmarks' },
-        { icon: ShieldCheck, label: 'Compliance' },
-        { icon: Settings, label: 'Settings' },
-      ].map((item) => (
-        <div key={item.label} className="flex items-center gap-3 text-sm text-white/80">
-          <item.icon size={16} className={palette.accent} />
-          <span className={`${palette.textMain(isDark)}`}>{item.label}</span>
-        </div>
-      ))}
-    </Surface>
-    <Surface isDark={isDark} className="p-4 space-y-2">
-      <p className={`text-xs uppercase tracking-[0.2em] ${palette.textSubtle(isDark)}`}>Security</p>
-      <div className="flex items-center gap-2">
-        <FolderLock size={18} className={palette.accent} />
-        <p className={`${palette.textMain(isDark)} text-sm`}>End-to-end encryption</p>
-      </div>
-      <div className="flex items-center gap-2">
-        <Fingerprint size={18} className={palette.accent} />
-        <p className={`${palette.textMain(isDark)} text-sm`}>SAML & SSO enforced</p>
-      </div>
-    </Surface>
-  </div>
-);
-
-const MobileNav = ({ isDark, open, onClose, onNavigate, toggle }) => (
-  <div
-    className={`lg:hidden fixed inset-0 z-30 transition ${
-      open ? 'pointer-events-auto' : 'pointer-events-none'
-    }`}
-  >
-    <div
-      className={`absolute inset-0 bg-black/60 backdrop-blur-sm transition-opacity ${
-        open ? 'opacity-100' : 'opacity-0'
-      }`}
-      onClick={onClose}
-    />
-    <div
-      className={`absolute inset-y-0 right-0 w-[82%] max-w-sm ${
-        isDark ? 'bg-[#0d0d0d]' : 'bg-white'
-      } border-l ${isDark ? 'border-white/10' : 'border-black/10'} shadow-2xl transform transition-transform ${
-        open ? 'translate-x-0' : 'translate-x-full'
-      }`}
-    >
-      <div
-        className={`flex items-center justify-between px-4 py-4 border-b ${
-          isDark ? 'border-white/5' : 'border-black/10'
-        }`}
-      >
-        <div className="flex items-center gap-3">
-          <div
-            className={`w-10 h-10 rounded-full flex items-center justify-center border ${
-              isDark ? 'border-white/10 bg-white/5' : 'border-black/10 bg-black/5'
-            }`}
-          >
-            <span className={`font-serif font-bold text-xl ${palette.textMain(isDark)}`}>J.</span>
-          </div>
-          <div>
-            <p className={`text-xs uppercase tracking-[0.2em] ${palette.textSubtle(isDark)}`}>DocSign</p>
-            <p className={`font-semibold ${palette.textMain(isDark)}`}>Elite Jurist</p>
-          </div>
-        </div>
+        { icon: Scale, active: true },
+        { icon: Search, active: false },
+        { icon: Bookmark, active: false },
+        { icon: Fingerprint, active: false },
+      ].map((item, idx) => (
         <button
-          onClick={onClose}
-          className={`w-10 h-10 rounded-full flex items-center justify-center border ${
-            isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'
-          }`}
-          aria-label="Close navigation"
+          key={idx}
+          className={`
+            w-12 h-12 rounded-full flex items-center justify-center transition-all duration-300
+            ${
+              item.active
+                ? isDark
+                  ? 'bg-white text-black shadow-[0_0_15px_rgba(255,255,255,0.2)]'
+                  : 'bg-black text-white shadow-lg'
+                : isDark
+                  ? 'text-white/40 hover:bg-white/10 hover:text-white'
+                  : 'text-black/40 hover:bg-black/5 hover:text-black'
+            }
+          `}
         >
-          <X size={18} />
+          <item.icon size={20} strokeWidth={1.5} />
         </button>
-      </div>
-      <div className="p-4 space-y-4">
-        {[{ icon: Scale, label: 'Workspace' }, { icon: Search, label: 'Search' }, { icon: Bookmark, label: 'Bookmarks' }].map(
-          (item) => (
-            <div key={item.label} className="flex items-center gap-3 text-sm">
-              <item.icon size={18} className={palette.accent} />
-              <span className={`${palette.textMain(isDark)}`}>{item.label}</span>
-            </div>
-          )
-        )}
-        <div className="pt-3 border-t border-white/5 space-y-3">
-          <button
-            onClick={() => onNavigate('scan')}
-            className={`w-full px-4 py-3 rounded-xl font-semibold flex items-center justify-between ${
-              isDark ? 'bg-white text-black' : 'bg-black text-white'
-            }`}
-          >
-            Start scan <ArrowUpRight size={16} />
-          </button>
-          <button
-            onClick={toggle}
-            className={`w-full px-4 py-3 rounded-xl border flex items-center justify-between ${
-              isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'
-            }`}
-          >
-            {isDark ? 'Switch to light' : 'Switch to dark'}
-            <Zap size={16} className={palette.accent} />
-          </button>
+      ))}
+    </div>
+  </div>
+);
+
+// --- ШАПКА ---
+
+const Header = ({ isDark, toggle, forceMobile, setForceMobile }) => (
+  <header className={`fixed top-0 left-0 right-0 z-50 px-6 py-6 transition-colors duration-500`}>
+    <div className="flex justify-between items-center gap-3">
+      <div className="flex items-center gap-3">
+        <div className={`w-10 h-10 rounded-full flex items-center justify-center border ${isDark ? 'border-white/20 bg-white/5' : 'border-black/10 bg-white/50'}`}>
+          <span className={`font-serif font-bold text-xl ${styles.textMain(isDark)}`}>J.</span>
+        </div>
+        <div className="hidden sm:block">
+          <p className={`text-xs uppercase tracking-[0.25em] ${styles.textSec(isDark)}`}>DocSign</p>
+          <p className={`font-semibold ${styles.textMain(isDark)}`}>Elite Jurist</p>
         </div>
       </div>
-    </div>
-  </div>
-);
 
-const MobileDock = ({ isDark, onNavigate }) => (
-  <div className="lg:hidden fixed bottom-0 left-0 right-0 px-4 pb-4 z-20">
-    <div
-      className={`rounded-2xl border px-4 py-3 flex items-center justify-between shadow-2xl ${
-        palette.panel(isDark)
-      } ${palette.panelHover(isDark)}`}
-    >
-      {[{ icon: Scale, label: 'Desk' }, { icon: Search, label: 'Search' }, { icon: Zap, label: 'Scan' }, { icon: Fingerprint, label: 'Identity' }].map(
-        (item) => (
-          <button
-            key={item.label}
-            onClick={() => item.label === 'Scan' && onNavigate('scan')}
-            className={`flex flex-col items-center gap-1 text-xs ${palette.textSubtle(isDark)}`}
-          >
-            <div
-              className={`w-11 h-11 rounded-xl flex items-center justify-center ${
-                isDark ? 'bg-white/5' : 'bg-black/5'
-              }`}
-            >
-              <item.icon size={18} className={palette.accent} />
-            </div>
-            {item.label}
-          </button>
-        )
-      )}
-    </div>
-  </div>
-);
-
-const TopBar = ({ isDark, toggle, onOpenMobile }) => (
-  <div
-    className={`sticky top-0 z-20 backdrop-blur-xl px-4 sm:px-6 py-4 flex items-center gap-3 border-b ${
-      isDark ? 'bg-black/60 border-white/5' : 'bg-white/80 border-black/10'
-    }`}
-  >
-    <button
-      onClick={onOpenMobile}
-      className={`lg:hidden w-11 h-11 rounded-full flex items-center justify-center border ${
-        isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'
-      }`}
-      aria-label="Toggle navigation"
-    >
-      <Menu size={18} />
-    </button>
-    <div className="flex-1 flex items-center gap-3">
-      <div
-        className={`flex items-center gap-2 rounded-xl px-3 py-2 border w-full sm:max-w-lg ${
-          isDark ? 'border-white/10 bg-white/5' : 'border-black/10 bg-white/70'
-        }`}
-      >
-        <Search size={16} className={isDark ? 'text-white/60' : 'text-black/60'} />
-        <input
-          className={`bg-transparent outline-none text-sm flex-1 ${palette.textMain(isDark)}`}
-          placeholder="Search matters, clauses, or citations"
-        />
+      <div className="flex items-center gap-2">
+        <button
+          onClick={() => setForceMobile((prev) => !prev)}
+          className={`hidden sm:inline-flex px-3 py-2 rounded-lg border text-xs tracking-widest uppercase ${
+            isDark ? 'border-white/15 text-white' : 'border-black/15 text-black'
+          }`}
+        >
+          {forceMobile ? 'Десктоп' : 'Мобильная версия'}
+        </button>
+        <IconButton icon={Zap} isDark={isDark} onClick={toggle} label="Сменить тему" />
+        <IconButton icon={Menu} isDark={isDark} onClick={() => setForceMobile((prev) => !prev)} label="Меню" />
       </div>
-      <button
-        className={`hidden sm:inline-flex px-3 py-2 rounded-lg border text-sm ${
-          isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'
-        }`}
-      >
-        Filters
-      </button>
     </div>
-    <div className="hidden sm:flex items-center gap-2">
-      <button
-        className={`w-10 h-10 rounded-full border ${isDark ? 'border-white/10' : 'border-black/10'} flex items-center justify-center`}
-      >
-        <Bell size={18} className={palette.accent} />
-      </button>
-      <button
-        onClick={toggle}
-        className={`px-4 py-2 rounded-lg border font-semibold ${
-          isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'
-        }`}
-      >
-        {isDark ? 'Light mode' : 'Dark mode'}
-      </button>
-    </div>
-  </div>
+  </header>
 );
 
-export default function App() {
+// --- ЛОГИКА ---
+
+export default function EliteJuristApp() {
   const { isDark, toggle } = useTheme();
   const [view, setView] = useState('dashboard');
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [forceMobile, setForceMobile] = useState(false);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light');
   }, [isDark]);
 
+  const mainWidth = forceMobile ? 'max-w-md' : 'max-w-5xl';
+  const mainHeight = forceMobile ? 'h-screen overflow-y-auto no-scrollbar' : '';
+
   return (
-    <div className={`min-h-screen ${palette.bg(isDark)} text-white relative overflow-hidden`}>
-      <div className="absolute inset-0 pointer-events-none opacity-70" aria-hidden>
-        <div className="absolute -top-32 -left-24 w-[40vw] h-[40vw] rounded-full bg-gradient-to-br from-[#C5A059]/20 to-transparent blur-[120px]" />
-        <div className="absolute top-10 right-0 w-[30vw] h-[30vw] rounded-full bg-gradient-to-br from-[#1a1a1a] to-transparent blur-[160px]" />
+    <div className={`relative min-h-screen font-sans transition-colors duration-700 ${styles.bg(isDark)}`}>
+      <div className="fixed inset-0 pointer-events-none overflow-hidden">
+        <div className={`absolute -top-[20%] -left-[10%] w-[70%] h-[70%] rounded-full blur-[120px] opacity-[0.06] ${isDark ? 'bg-white' : 'bg-black'}`}></div>
       </div>
-      <div className="relative flex">
-        <Sidebar isDark={isDark} />
-        <div className="flex-1 max-w-[1400px] mx-auto w-full">
-          <TopBar isDark={isDark} toggle={toggle} onOpenMobile={() => setMobileNavOpen(true)} />
-          <main className="px-4 sm:px-6 pb-24 space-y-8">
-            {view === 'dashboard' && <Dashboard isDark={isDark} onNavigate={setView} />}
-            {view === 'scan' && <ScanView isDark={isDark} onBack={() => setView('dashboard')} />}
-          </main>
-        </div>
-      </div>
-      <MobileNav
-        isDark={isDark}
-        open={mobileNavOpen}
-        onClose={() => setMobileNavOpen(false)}
-        onNavigate={(next) => {
-          setView(next);
-          setMobileNavOpen(false);
-        }}
-        toggle={toggle}
-      />
-      <MobileDock isDark={isDark} onNavigate={setView} />
+
+      <Header isDark={isDark} toggle={toggle} forceMobile={forceMobile} setForceMobile={setForceMobile} />
+
+      <main className={`relative ${mainWidth} mx-auto ${mainHeight} pt-2 pb-16 sm:pb-24`}>
+        {view === 'dashboard' && <Dashboard isDark={isDark} onNavigate={setView} />}
+        {view === 'scan' && <ScanView isDark={isDark} onBack={() => setView('dashboard')} />}
+      </main>
+
+      <LuxuryNav isDark={isDark} />
+
+      <style>{`
+        @keyframes scan-beam {
+          0% { transform: translateY(-100%); }
+          100% { transform: translateY(360px); }
+        }
+        .animate-scan-beam {
+          animation: scan-beam 2s linear infinite;
+        }
+        .animate-in {
+            animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
     </div>
   );
 }
