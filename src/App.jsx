@@ -111,19 +111,31 @@ const buildPipelineResult = (text, issues) => {
   };
 };
 
-const LLM_MODEL = 'gpt-5-mini';
+const DEFAULT_LLM_SETTINGS = {
+  model: 'gpt-5-mini',
+  temperature: 0.2,
+  maxTokens: 1200,
+  topP: 1,
+};
 
-const callLLM = async ({ system, user, apiKey, log }) => {
+const callLLM = async ({ system, user, apiKey, log, settings }) => {
+  const model = settings?.model?.trim() || DEFAULT_LLM_SETTINGS.model;
+  const temperature = Number(settings?.temperature ?? DEFAULT_LLM_SETTINGS.temperature);
+  const max_tokens = settings?.maxTokens ? Number(settings.maxTokens) : undefined;
+  const top_p = settings?.topP ? Number(settings.topP) : undefined;
+
   const payload = {
-    model: LLM_MODEL,
+    model,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    temperature: 0.2,
+    temperature,
+    ...(typeof max_tokens === 'number' && !Number.isNaN(max_tokens) ? { max_tokens } : {}),
+    ...(typeof top_p === 'number' && !Number.isNaN(top_p) ? { top_p } : {}),
   };
 
-  log?.('info', `LLM запрос (${LLM_MODEL})`, payload);
+  log?.('info', `LLM запрос (${model})`, { ...payload, messages: undefined });
 
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
@@ -173,7 +185,7 @@ const safeJSON = (str, log) => {
   }
 };
 
-const runPipeline = async ({ text, issues, apiKey, log }) => {
+const runPipeline = async ({ text, issues, apiKey, log, settings }) => {
   if (!text || !text.trim()) {
     throw new Error('Загруженный документ пуст или не удалось извлечь текст.');
   }
@@ -189,7 +201,13 @@ const runPipeline = async ({ text, issues, apiKey, log }) => {
   const judgePrompt = `Ты — Партнер юридической фирмы и главный редактор. Проверь список рисков младшего юриста. Удали ложные срабатывания, оставь только влияющие на бизнес. Для каждого подтверджённого риска предложи идеальную формулировку (Gold Standard Clause) с компромиссным тоном для контрагента. Верни результат строго в JSON со структурой: {"document_meta":{...},"analysis":[{original_id,original_text,risk_level,issue_title,legal_basis,ai_suggestion,diff_highlight:{remove,add}}]}.`;
 
   log?.('info', 'Шаг 1: парсинг документа', { length: text.length });
-  const parserAnswer = await callLLM({ system: parserPrompt, user: text.slice(0, 12000), apiKey, log });
+  const parserAnswer = await callLLM({
+    system: parserPrompt,
+    user: text.slice(0, 12000),
+    apiKey,
+    log,
+    settings,
+  });
   const { data: parserJSON } = safeJSON(parserAnswer, log);
   if (!parserJSON) {
     throw new Error('LLM не вернул корректный JSON на этапе парсинга.');
@@ -201,6 +219,7 @@ const runPipeline = async ({ text, issues, apiKey, log }) => {
     user: JSON.stringify(parserJSON).slice(0, 12000),
     apiKey,
     log,
+    settings,
   });
   const { data: redTeamJSON } = safeJSON(redTeamAnswer, log);
   if (!redTeamJSON) {
@@ -213,6 +232,7 @@ const runPipeline = async ({ text, issues, apiKey, log }) => {
     user: JSON.stringify(redTeamJSON).slice(0, 12000),
     apiKey,
     log,
+    settings,
   });
   const { data: judgeJSON } = safeJSON(judgeAnswer, log);
   if (!judgeJSON?.analysis) {
@@ -280,6 +300,148 @@ const ApiKeyModal = ({ visible, onClose, onSave, apiKey, isDark }) => {
           >
             Сохранить ключ
           </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const AdminPanel = ({ visible, onClose, isDark, apiKey, onSaveKey, settings, onSaveSettings }) => {
+  const t = isDark ? theme.dark : theme.light;
+  const [localKey, setLocalKey] = useState(apiKey || '');
+  const [localSettings, setLocalSettings] = useState({
+    model: settings?.model || DEFAULT_LLM_SETTINGS.model,
+    temperature: settings?.temperature ?? DEFAULT_LLM_SETTINGS.temperature,
+    maxTokens: settings?.maxTokens ?? DEFAULT_LLM_SETTINGS.maxTokens,
+    topP: settings?.topP ?? DEFAULT_LLM_SETTINGS.topP,
+  });
+
+  useEffect(() => {
+    setLocalKey(apiKey || '');
+  }, [apiKey]);
+
+  useEffect(() => {
+    setLocalSettings({
+      model: settings?.model || DEFAULT_LLM_SETTINGS.model,
+      temperature: settings?.temperature ?? DEFAULT_LLM_SETTINGS.temperature,
+      maxTokens: settings?.maxTokens ?? DEFAULT_LLM_SETTINGS.maxTokens,
+      topP: settings?.topP ?? DEFAULT_LLM_SETTINGS.topP,
+    });
+  }, [settings]);
+
+  if (!visible) return null;
+
+  return (
+    <div className={`fixed inset-0 z-[75] flex items-center justify-center ${t.bg} bg-opacity-90 animate-in`}>
+      <div className={`w-full max-w-3xl rounded-2xl p-8 border ${t.border} ${t.paper} shadow-2xl relative`}>
+        <button
+          aria-label="Закрыть"
+          onClick={onClose}
+          className={`absolute top-4 right-4 p-2 rounded-full ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}
+        >
+          <X size={18} />
+        </button>
+        <div className="flex items-center gap-3 mb-4">
+          <Settings className={t.accent} />
+          <h3 className={`text-xl font-serif-display ${t.textPrimary}`}>Админка LLM</h3>
+        </div>
+        <p className={`text-sm mb-6 ${t.textSecondary}`}>
+          Управляйте ключами и параметрами запросов к GPT (модель, температура, max tokens, top-p). Настройки сохраняются локально
+          и применяются ко всем шагам пайплайна.
+        </p>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className={`p-4 rounded-xl border ${t.border} ${isDark ? 'bg-white/5' : 'bg-black/5'}`}>
+            <h4 className={`font-serif-display text-lg mb-3 ${t.textPrimary}`}>API ключ</h4>
+            <input
+              value={localKey}
+              onChange={(e) => setLocalKey(e.target.value)}
+              placeholder="sk-..."
+              className={`w-full p-3 rounded-lg border ${t.border} ${t.paper} ${t.textPrimary} outline-none mb-3`}
+            />
+            <div className="flex gap-3">
+              <Button
+                variant="primary"
+                isDark={isDark}
+                onClick={() => {
+                  onSaveKey?.(localKey.trim());
+                }}
+                className="flex-1"
+              >
+                Сохранить ключ
+              </Button>
+              <Button
+                variant="secondary"
+                isDark={isDark}
+                onClick={() => {
+                  setLocalKey('');
+                  onSaveKey?.('');
+                }}
+              >
+                Очистить
+              </Button>
+            </div>
+          </div>
+
+          <div className={`p-4 rounded-xl border ${t.border} ${isDark ? 'bg-white/5' : 'bg-black/5'}`}>
+            <h4 className={`font-serif-display text-lg mb-3 ${t.textPrimary}`}>Модель и лимиты</h4>
+            <label className={`text-xs uppercase tracking-widest font-bold ${t.textSecondary}`}>Модель</label>
+            <input
+              value={localSettings.model}
+              onChange={(e) => setLocalSettings((s) => ({ ...s, model: e.target.value }))}
+              className={`w-full p-3 rounded-lg border ${t.border} ${t.paper} ${t.textPrimary} outline-none mb-3`}
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={`text-xs uppercase tracking-widest font-bold ${t.textSecondary}`}>Температура</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={localSettings.temperature}
+                  onChange={(e) => setLocalSettings((s) => ({ ...s, temperature: Number(e.target.value) }))}
+                  className="w-full"
+                />
+                <div className={`text-sm ${t.textPrimary}`}>{localSettings.temperature}</div>
+              </div>
+              <div>
+                <label className={`text-xs uppercase tracking-widest font-bold ${t.textSecondary}`}>Top P</label>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.05"
+                  value={localSettings.topP}
+                  onChange={(e) => setLocalSettings((s) => ({ ...s, topP: Number(e.target.value) }))}
+                  className="w-full"
+                />
+                <div className={`text-sm ${t.textPrimary}`}>{localSettings.topP}</div>
+              </div>
+            </div>
+            <label className={`text-xs uppercase tracking-widest font-bold ${t.textSecondary}`}>Max tokens</label>
+            <input
+              type="number"
+              min="256"
+              max="32000"
+              value={localSettings.maxTokens}
+              onChange={(e) => setLocalSettings((s) => ({ ...s, maxTokens: Number(e.target.value) }))}
+              className={`w-full p-3 rounded-lg border ${t.border} ${t.paper} ${t.textPrimary} outline-none`}
+            />
+
+            <Button
+              variant="primary"
+              isDark={isDark}
+              className="w-full mt-4"
+              onClick={() => onSaveSettings?.(localSettings)}
+            >
+              Сохранить параметры
+            </Button>
+          </div>
+        </div>
+
+        <div className={`mt-4 text-xs ${t.textSecondary}`}>
+          Настройки применяются к шагам: парсер → red team → судья. Для экономии токенов уменьшайте max tokens и температуру.
         </div>
       </div>
     </div>
@@ -366,7 +528,7 @@ const StepIndicator = ({ status, label, isDark }) => {
   );
 };
 
-const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi, onError, onLog }) => {
+const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi, onError, onLog, settings }) => {
   const t = isDark ? theme.dark : theme.light;
   const [step, setStep] = useState(0);
   const [error, setError] = useState('');
@@ -401,6 +563,7 @@ const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi
           issues: doc?.issues,
           apiKey,
           log: onLog,
+          settings,
         });
         if (cancelled) return;
         setStep(4);
@@ -425,7 +588,7 @@ const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi
     return () => {
       cancelled = true;
     };
-  }, [apiKey, doc, attempt, onLog]);
+  }, [apiKey, doc, attempt, onLog, settings]);
 
   const steps = [
     '1. Парсинг и структурирование (статьи, пункты)',
@@ -921,7 +1084,7 @@ const RecentMatter = ({ matter, isDark }) => {
   );
 };
 
-const MobileExperience = ({ onSwitch, onOpenApi, apiKey, onLog, onOpenLogs }) => {
+const MobileExperience = ({ onSwitch, onOpenApi, apiKey, onLog, onOpenLogs, settings, onOpenAdmin }) => {
   const [isDark, setIsDark] = useState(true);
   const [view, setView] = useState('dashboard');
   const [matters, setMatters] = useState([
@@ -974,6 +1137,7 @@ const MobileExperience = ({ onSwitch, onOpenApi, apiKey, onLog, onOpenLogs }) =>
           isDark={isDark}
           apiKey={apiKey}
           doc={pendingDoc}
+          settings={settings}
           onOpenApi={onOpenApi}
           onLog={onLog}
           onError={(message) => {
@@ -1019,18 +1183,24 @@ const MobileExperience = ({ onSwitch, onOpenApi, apiKey, onLog, onOpenLogs }) =>
               </div>
               <span className={`font-serif-display font-bold text-lg ${t.textPrimary}`}>Jurist AI</span>
             </div>
-            <div className="flex gap-2">
-              <button
-                onClick={onOpenApi}
-                className={`px-3 py-2 rounded-lg text-xs font-semibold ${isDark ? 'bg-white/10 text-white' : 'bg-black/5 text-black'}`}
-              >
-                API ключ
-              </button>
-              <button
-                onClick={() => {
-                  onLog?.('info', 'Открытие окна логов', { source: 'mobile-header' });
-                  onOpenLogs?.();
-                }}
+              <div className="flex gap-2">
+                <button
+                  onClick={onOpenApi}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold ${isDark ? 'bg-white/10 text-white' : 'bg-black/5 text-black'}`}
+                >
+                  API ключ
+                </button>
+                <button
+                  onClick={onOpenAdmin}
+                  className={`px-3 py-2 rounded-lg text-xs font-semibold ${isDark ? 'bg-white/10 text-white' : 'bg-black/5 text-black'}`}
+                >
+                  Админка
+                </button>
+                <button
+                  onClick={() => {
+                    onLog?.('info', 'Открытие окна логов', { source: 'mobile-header' });
+                    onOpenLogs?.();
+                  }}
                 className={`px-3 py-2 rounded-lg text-xs font-semibold ${isDark ? 'bg-white/10 text-white' : 'bg-black/5 text-black'}`}
               >
                 Логи
@@ -1306,7 +1476,7 @@ const DashboardView = ({ isDark, onStartUpload }) => (
 );
 
 
-const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey, pipelineError = '', onOpenLogs }) => {
+const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey, pipelineError = '', onOpenLogs, settings, onOpenAdmin }) => {
   const { text, issues, name, pipeline } = documentData;
   const preview = text.split(/\n+/).filter(Boolean).slice(0, 6);
 
@@ -1355,6 +1525,11 @@ const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey, pipelineEr
           >
             {apiKey ? 'API подключен' : 'API не задан'}
           </span>
+          <span className={`text-[11px] uppercase tracking-wider font-bold px-3 py-1 rounded-full border ${
+              isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'
+            }`}>
+            {settings?.model || 'gpt-5-mini'} · T={settings?.temperature ?? DEFAULT_LLM_SETTINGS.temperature}
+          </span>
           <button
             onClick={onOpenLogs}
             className={`px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider border ${
@@ -1362,6 +1537,14 @@ const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey, pipelineEr
             }`}
           >
             Логи
+          </button>
+          <button
+            onClick={onOpenAdmin}
+            className={`px-3 py-2 rounded-lg text-[11px] font-bold uppercase tracking-wider border ${
+              isDark ? 'border-white/10 text-white hover:bg-white/10' : 'border-black/10 text-black hover:bg-black/5'
+            }`}
+          >
+            Настройки LLM
           </button>
           <button
             className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${
@@ -1485,7 +1668,7 @@ const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey, pipelineEr
   );
 };
 
-const DesktopExperience = ({ onSwitch, apiKey, onOpenApi, onLog, onOpenLogs }) => {
+const DesktopExperience = ({ onSwitch, apiKey, onOpenApi, onLog, onOpenLogs, settings, onOpenAdmin }) => {
   const [isDark, setIsDark] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [collapsed, setCollapsed] = useState(false);
@@ -1529,6 +1712,7 @@ const DesktopExperience = ({ onSwitch, apiKey, onOpenApi, onLog, onOpenLogs }) =
           isDark={isDark}
           apiKey={apiKey}
           doc={pendingDoc}
+          settings={settings}
           onOpenApi={onOpenApi}
           onLog={onLog}
           onError={(message) => {
@@ -1606,6 +1790,13 @@ const DesktopExperience = ({ onSwitch, apiKey, onOpenApi, onLog, onOpenLogs }) =
             <Zap size={20} className={isDark ? 'text-white' : 'text-black'} />
           </button>
           <button
+            onClick={onOpenAdmin}
+            className={`p-3 rounded-xl transition-colors ${isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-black'}`}
+            aria-label="LLM настройки"
+          >
+            <Settings size={18} />
+          </button>
+          <button
             onClick={onSwitch}
             className={`p-3 rounded-xl transition-colors ${isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-black'}`}
             aria-label="Мобильная версия"
@@ -1645,6 +1836,8 @@ const DesktopExperience = ({ onSwitch, apiKey, onOpenApi, onLog, onOpenLogs }) =
             apiKey={apiKey}
             pipelineError={pipelineError}
             onOpenLogs={onOpenLogs}
+            settings={settings}
+            onOpenAdmin={onOpenAdmin}
           />
         )}
       </main>
@@ -1656,7 +1849,16 @@ const DesktopExperience = ({ onSwitch, apiKey, onOpenApi, onLog, onOpenLogs }) =
 export default function App() {
   const [mode, setMode] = useState('desktop');
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('jurist_api_key') || '');
+  const [llmSettings, setLlmSettings] = useState(() => {
+    try {
+      const stored = JSON.parse(localStorage.getItem('jurist_llm_settings') || 'null');
+      return stored || DEFAULT_LLM_SETTINGS;
+    } catch (e) {
+      return DEFAULT_LLM_SETTINGS;
+    }
+  });
   const [showApiModal, setShowApiModal] = useState(false);
+  const [showAdminModal, setShowAdminModal] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [logEntries, setLogEntries] = useState([]);
 
@@ -1671,6 +1873,10 @@ export default function App() {
     localStorage.setItem('jurist_api_key', apiKey || '');
   }, [apiKey]);
 
+  useEffect(() => {
+    localStorage.setItem('jurist_llm_settings', JSON.stringify(llmSettings || DEFAULT_LLM_SETTINGS));
+  }, [llmSettings]);
+
   return (
     <div className="min-h-screen">
       <ApiKeyModal
@@ -1679,6 +1885,19 @@ export default function App() {
         onSave={setApiKey}
         apiKey={apiKey}
         isDark={mode === 'desktop'}
+      />
+      <AdminPanel
+        visible={showAdminModal}
+        onClose={() => setShowAdminModal(false)}
+        isDark={mode === 'desktop'}
+        apiKey={apiKey}
+        onSaveKey={setApiKey}
+        settings={llmSettings}
+        onSaveSettings={(next) => {
+          setLlmSettings(next);
+          setShowAdminModal(false);
+          appendLog('info', 'LLM настройки обновлены', next);
+        }}
       />
       <LogConsole
         visible={showLogs}
@@ -1693,6 +1912,8 @@ export default function App() {
           onOpenApi={() => setShowApiModal(true)}
           onLog={appendLog}
           onOpenLogs={() => setShowLogs(true)}
+          onOpenAdmin={() => setShowAdminModal(true)}
+          settings={llmSettings}
         />
       ) : (
         <MobileExperience
@@ -1701,6 +1922,8 @@ export default function App() {
           apiKey={apiKey}
           onLog={appendLog}
           onOpenLogs={() => setShowLogs(true)}
+          onOpenAdmin={() => setShowAdminModal(true)}
+          settings={llmSettings}
         />
       )}
     </div>
