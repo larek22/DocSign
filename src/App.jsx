@@ -124,14 +124,11 @@ const callLLM = async ({ system, user, apiKey, log, settings }) => {
   const max_tokens = settings?.maxTokens ? Number(settings.maxTokens) : undefined;
   const top_p = settings?.topP ? Number(settings.topP) : undefined;
 
-  // gpt-5-mini не принимает явную температуру, кроме дефолтной. Убираем параметр и фиксируем поведение.
+  // gpt-5-mini не принимает пользовательскую температуру — вовсе не отправляем параметр.
   const isGpt5Mini = model?.startsWith('gpt-5-mini');
-  const temperature =
-    isGpt5Mini || Number.isNaN(rawTemperature) || rawTemperature === undefined
-      ? undefined
-      : rawTemperature;
-  if (isGpt5Mini && rawTemperature !== undefined && rawTemperature !== 1) {
-    log?.('info', 'Температура не передана для gpt-5-mini (используется значение по умолчанию)', {
+  const temperature = !isGpt5Mini && !Number.isNaN(rawTemperature) ? rawTemperature : undefined;
+  if (isGpt5Mini && rawTemperature !== undefined) {
+    log?.('info', 'Температура не отправлена для gpt-5-mini: модель использует встроенное значение', {
       requested: rawTemperature,
     });
   }
@@ -145,7 +142,8 @@ const callLLM = async ({ system, user, apiKey, log, settings }) => {
       { role: 'system', content: system },
       { role: 'user', content: user },
     ],
-    ...(temperature !== undefined ? { temperature } : {}),
+    // temperature намеренно не передаём для gpt-5-mini, чтобы избежать ошибок API
+    ...(!isGpt5Mini && temperature !== undefined ? { temperature } : {}),
     ...(typeof max_tokens === 'number' && !Number.isNaN(max_tokens)
       ? { [tokenField]: max_tokens }
       : {}),
