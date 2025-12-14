@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PyMuPDF Workbench</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body data-docs='{{ documents | tojson }}'>
+  <header class="shell">
+    <div>
+      <h1>PyMuPDF Workbench</h1>
+      <p>Юридский импорт/экспорт PDF с обрезкой полей, таблицами и штампами.</p>
+    </div>
+    <div class="status" data-health>⏳ Проверка сервиса...</div>
+  </header>
+
+  <section class="shell">
+    <h2>Загрузить PDF</h2>
+    <form id="upload-form">
+      <input type="file" name="file" accept="application/pdf" required />
+      <button type="submit">Загрузить</button>
+    </form>
+    <div id="upload-status" class="muted"></div>
+  </section>
+
+  <section class="shell" id="docs-panel">
+    <h2>Документы</h2>
+    <div id="docs-list" class="cards"></div>
+  </section>
+
+  <template id="doc-card">
+    <article class="card">
+      <header class="card__title"></header>
+      <div class="card__meta"></div>
+      <div class="card__actions">
+        <button data-action="text">Извлечь текст</button>
+        <button data-action="image">Страница 1 в PNG</button>
+        <button data-action="tables">Таблицы</button>
+        <button data-action="stamp">Ставить штамп</button>
+        <a data-action="download" target="_blank" rel="noreferrer">Скачать</a>
+        <button data-action="delete" class="danger">Удалить</button>
+      </div>
+      <pre class="card__output"></pre>
+      <img class="card__image" alt="" />
+    </article>
+  </template>
+
+  <script>
+    const tmpl = document.getElementById('doc-card');
+    const listEl = document.getElementById('docs-list');
+    const statusEl = document.querySelector('[data-health]');
+
+    async function checkHealth() {
+      try {
+        const res = await fetch('/health');
+        const json = await res.json();
+        statusEl.textContent = json.status === 'ok' ? '✅ Backend доступен' : '⚠️ Нет соединения';
+      } catch (e) {
+        statusEl.textContent = '⚠️ Нет соединения';
+      }
+    }
+
+    async function fetchDocs() {
+      listEl.innerHTML = '';
+      const docs = await Promise.all(window.initialDocs.map(loadCard));
+      docs.forEach(card => listEl.appendChild(card));
+    }
+
+    async function loadCard(meta) {
+      const node = tmpl.content.cloneNode(true);
+      const card = node.querySelector('.card');
+      card.dataset.id = meta.id;
+      card.querySelector('.card__title').textContent = meta.filename;
+      card.querySelector('.card__meta').textContent = `${meta.pages} стр • ${(meta.size/1024).toFixed(1)} KB`;
+      const out = card.querySelector('.card__output');
+      const img = card.querySelector('.card__image');
+      const btns = card.querySelectorAll('[data-action]');
+      btns.forEach(btn => btn.addEventListener('click', () => handleAction(meta.id, btn.dataset.action, out, img, card)));
+      card.querySelector('[data-action="download"]').href = `/api/docs/${meta.id}/download`;
+      return node;
+    }
+
+    async function handleAction(id, action, outEl, imgEl, cardEl) {
+      outEl.textContent = '';
+      imgEl.src = '';
+      if (action === 'text') {
+        const res = await fetch(`/api/docs/${id}/text?left=40&top=30&bottom=30`);
+        const json = await res.json();
+        outEl.textContent = json.text || '(пусто)';
+      }
+      if (action === 'image') {
+        imgEl.src = `/api/docs/${id}/page/0/png?dpi=150`;
+      }
+      if (action === 'tables') {
+        const res = await fetch(`/api/docs/${id}/tables`);
+        const json = await res.json();
+        outEl.textContent = JSON.stringify(json.tables, null, 2);
+      }
+      if (action === 'stamp') {
+        const text = prompt('Текст штампа', 'CONFIDENTIAL');
+        if (!text) return;
+        await fetch(`/api/docs/${id}/stamp`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({text})});
+        outEl.textContent = 'Штамп добавлен (страница 1, (72,72)). Скачайте файл.';
+      }
+      if (action === 'delete') {
+        await fetch(`/api/docs/${id}`, {method:'DELETE'});
+        cardEl.remove();
+      }
+    }
+
+    document.getElementById('upload-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      document.getElementById('upload-status').textContent = 'Загружаем...';
+      const res = await fetch('/api/upload', {method:'POST', body: fd});
+      if (!res.ok) {
+        document.getElementById('upload-status').textContent = 'Ошибка загрузки';
+        return;
+      }
+      const json = await res.json();
+      window.initialDocs.push(json.document);
+      const card = await loadCard(json.document);
+      listEl.prepend(card);
+      document.getElementById('upload-status').textContent = 'Готово';
+      e.target.reset();
+    });
+
+    window.initialDocs = JSON.parse(document.body.dataset.docs || '[]');
+    checkHealth();
+    fetchDocs();
+  </script>
+</body>
+</html>
