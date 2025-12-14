@@ -111,7 +111,7 @@ const buildPipelineResult = (text, issues) => {
   };
 };
 
-const LLM_MODEL = 'gpt-4o-mini';
+const LLM_MODEL = 'gpt-5-mini';
 
 const callLLM = async ({ system, user, apiKey, log }) => {
   const payload = {
@@ -146,11 +146,30 @@ const callLLM = async ({ system, user, apiKey, log }) => {
   return content;
 };
 
-const safeJSON = (str) => {
+const stripCodeFence = (raw = '') => {
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenced?.[1]) return fenced[1];
+  return raw.replace(/^```[a-zA-Z]*\s*/i, '').replace(/```$/i, '');
+};
+
+const safeJSON = (str, log) => {
+  if (!str) return { data: null, raw: '' };
+  const normalized = (() => {
+    const fenced = stripCodeFence(str.trim());
+    const first = fenced.indexOf('{');
+    const last = fenced.lastIndexOf('}');
+    if (first !== -1 && last !== -1 && last > first) return fenced.slice(first, last + 1);
+    return fenced;
+  })();
+
   try {
-    return JSON.parse(str);
-  } catch (e) {
-    return null;
+    return { data: JSON.parse(normalized), raw: normalized };
+  } catch (error) {
+    log?.('error', 'Не удалось распарсить JSON из ответа LLM', {
+      message: error.message,
+      snippet: normalized.slice(0, 400),
+    });
+    return { data: null, raw: normalized, error };
   }
 };
 
@@ -171,7 +190,7 @@ const runPipeline = async ({ text, issues, apiKey, log }) => {
 
   log?.('info', 'Шаг 1: парсинг документа', { length: text.length });
   const parserAnswer = await callLLM({ system: parserPrompt, user: text.slice(0, 12000), apiKey, log });
-  const parserJSON = safeJSON(parserAnswer);
+  const { data: parserJSON } = safeJSON(parserAnswer, log);
   if (!parserJSON) {
     throw new Error('LLM не вернул корректный JSON на этапе парсинга.');
   }
@@ -183,7 +202,7 @@ const runPipeline = async ({ text, issues, apiKey, log }) => {
     apiKey,
     log,
   });
-  const redTeamJSON = safeJSON(redTeamAnswer);
+  const { data: redTeamJSON } = safeJSON(redTeamAnswer, log);
   if (!redTeamJSON) {
     throw new Error('LLM не вернул корректный JSON на этапе поиска рисков.');
   }
@@ -195,9 +214,11 @@ const runPipeline = async ({ text, issues, apiKey, log }) => {
     apiKey,
     log,
   });
-  const judgeJSON = safeJSON(judgeAnswer);
+  const { data: judgeJSON } = safeJSON(judgeAnswer, log);
   if (!judgeJSON?.analysis) {
-    log?.('error', 'Этап судьи вернул неожиданный формат', { judgeAnswer: judgeAnswer?.slice(0, 500) });
+    log?.('error', 'Этап судьи вернул неожиданный формат', {
+      judgeAnswer: judgeAnswer?.slice(0, 500),
+    });
     throw new Error('LLM не смог собрать финальный JSON. Проверьте логи.');
   }
 
