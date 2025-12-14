@@ -111,6 +111,26 @@ const buildPipelineResult = (text, issues) => {
   };
 };
 
+const runPipeline = async ({ text, issues, apiKey }) => {
+  if (!text || !text.trim()) {
+    throw new Error('Загруженный документ пуст или не удалось извлечь текст.');
+  }
+
+  if (!apiKey) {
+    throw new Error('API ключ не указан. Добавьте ключ и повторите анализ.');
+  }
+
+  const finalIssues = issues?.length ? issues : extractIssuesFromText(text);
+
+  // Имитация сетевого вызова к LLM: задержка и локальный расчёт результата
+  await new Promise((resolve) => setTimeout(resolve, 600));
+
+  return {
+    pipeline: buildPipelineResult(text, finalIssues),
+    issues: finalIssues,
+  };
+};
+
 const ApiKeyModal = ({ visible, onClose, onSave, apiKey, isDark }) => {
   const [value, setValue] = useState(apiKey || '');
   const t = isDark ? theme.dark : theme.light;
@@ -182,24 +202,44 @@ const StepIndicator = ({ status, label, isDark }) => {
   );
 };
 
-const MultiStageLoader = ({ isDark, onComplete, onCancel }) => {
+const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi }) => {
   const t = isDark ? theme.dark : theme.light;
   const [step, setStep] = useState(0);
+  const [error, setError] = useState('');
+  const [attempt, setAttempt] = useState(0);
 
   useEffect(() => {
-    const timers = [
-      setTimeout(() => setStep(1), 800),
-      setTimeout(() => setStep(2), 2000),
-      setTimeout(() => setStep(3), 3600),
-      setTimeout(onComplete, 5200),
-    ];
-    return () => timers.forEach(clearTimeout);
-  }, [onComplete]);
+    let cancelled = false;
+    const run = async () => {
+      try {
+        setError('');
+        setStep(1);
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        setStep(2);
+        await new Promise((resolve) => setTimeout(resolve, 1200));
+        setStep(3);
+        const result = await runPipeline({ text: doc?.text, issues: doc?.issues, apiKey });
+        if (cancelled) return;
+        setStep(4);
+        await new Promise((resolve) => setTimeout(resolve, 400));
+        onComplete(result);
+      } catch (err) {
+        if (cancelled) return;
+        setError(err.message || 'Неизвестная ошибка при анализе документа.');
+      }
+    };
+
+    run();
+    return () => {
+      cancelled = true;
+    };
+  }, [apiKey, doc, onComplete, attempt]);
 
   const steps = [
     '1. Парсинг и структурирование (статьи, пункты)',
     '2. Red Team: поиск всех рисков',
     '3. Судья: валидация и идеальные формулировки',
+    '4. Сборка итогового JSON',
   ];
 
   const renderStatus = (idx) => {
@@ -224,6 +264,25 @@ const MultiStageLoader = ({ isDark, onComplete, onCancel }) => {
             <StepIndicator key={label} status={renderStatus(idx)} label={label} isDark={isDark} />
           ))}
         </div>
+
+        {error && (
+          <div className={`mt-8 p-4 rounded-xl border ${t.border} ${t.paper}`}>
+            <p className={`text-sm mb-3 ${t.textPrimary}`}>{error}</p>
+            <div className="flex gap-3 flex-wrap justify-center">
+              <Button variant="primary" isDark={isDark} onClick={() => setAttempt((a) => a + 1)}>
+                Повторить анализ
+              </Button>
+              {onOpenApi && (
+                <Button variant="secondary" isDark={isDark} onClick={onOpenApi}>
+                  Добавить API ключ
+                </Button>
+              )}
+              <Button variant="ghost" isDark={isDark} onClick={onCancel}>
+                Закрыть
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -684,6 +743,7 @@ const MobileExperience = ({ onSwitch, onOpenApi, apiKey }) => {
     pipeline: buildPipelineResult(INITIAL_TEXT, INITIAL_ISSUES),
   });
   const [pendingDoc, setPendingDoc] = useState(null);
+  const [pipelineError, setPipelineError] = useState('');
 
   const t = isDark ? theme.dark : theme.light;
 
@@ -710,6 +770,7 @@ const MobileExperience = ({ onSwitch, onOpenApi, apiKey }) => {
           isDark={isDark}
           onCancel={() => setView('dashboard')}
           onUploadComplete={(data) => {
+            setPipelineError('');
             setPendingDoc(data);
             setView('analyzing');
           }}
@@ -719,16 +780,24 @@ const MobileExperience = ({ onSwitch, onOpenApi, apiKey }) => {
       {view === 'analyzing' && pendingDoc && (
         <MultiStageLoader
           isDark={isDark}
-          onCancel={() => setView('dashboard')}
-          onComplete={() => {
+          apiKey={apiKey}
+          doc={pendingDoc}
+          onOpenApi={onOpenApi}
+          onCancel={() => {
+            setPipelineError('Анализ остановлен пользователем.');
+            setView('dashboard');
+            setPendingDoc(null);
+          }}
+          onComplete={(result) => {
             setDocumentData({
               text: pendingDoc.text,
-              issues: pendingDoc.issues,
+              issues: result.issues,
               name: pendingDoc.name,
-              pipeline: buildPipelineResult(pendingDoc.text, pendingDoc.issues),
+              pipeline: result.pipeline,
             });
             setView('workspace');
             setPendingDoc(null);
+            setPipelineError('');
           }}
         />
       )}
@@ -785,6 +854,14 @@ const MobileExperience = ({ onSwitch, onOpenApi, apiKey }) => {
               Коллега.
             </h1>
           </div>
+
+          {pipelineError && (
+            <div className="px-6 mb-6 animate-in" style={{ animationDelay: '0.05s' }}>
+              <div className={`p-4 rounded-xl border ${t.border} ${t.paper} text-sm ${t.textPrimary}`}>
+                {pipelineError}
+              </div>
+            </div>
+          )}
 
           <div className="px-6 grid grid-cols-2 gap-4 mb-8 animate-in" style={{ animationDelay: '0.1s' }}>
             <StatCardMobile label="В работе" value={matters.length} icon={Activity} isDark={isDark} trend="+1 нов." />
@@ -1057,7 +1134,7 @@ const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey }) => {
   };
 
   return (
-    <div className="h-screen flex flex-col animate-in slide-in-from-bottom-4">
+    <div className="h-screen flex flex-col animate-in slide-in-from-bottom-4 relative">
       <div className={`h-16 border-b flex items-center justify-between px-6 ${isDark ? 'border-white/5 bg-[#0B0C10]' : 'border-black/5 bg-white'}`}>
         <div className="flex items-center gap-4">
           <h2 className={`font-serif text-lg ${desktopStyles.textMain(isDark)}`}>{name}</h2>
@@ -1094,6 +1171,14 @@ const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey }) => {
       </div>
 
       <div className="flex-1 flex overflow-hidden">
+        {pipelineError && (
+          <div className={`absolute top-16 left-0 right-0 z-10 px-6 py-3 text-sm ${
+            isDark ? 'bg-red-500/10 border-b border-red-500/30 text-red-100' : 'bg-red-50 border-b border-red-200 text-red-800'
+          }`}>
+            {pipelineError}
+          </div>
+        )}
+
         <div className={`flex-1 overflow-y-auto p-12 flex justify-center ${isDark ? 'bg-[#121212]' : 'bg-[#F2F0E9]'}`}>
           <div className={`w-[800px] min-h-[1000px] shadow-2xl p-16 relative ${isDark ? 'bg-[#1E1E1E] text-gray-300' : 'bg-white text-gray-800'}`}>
             <div className="mb-12 flex justify-between">
@@ -1193,6 +1278,7 @@ const DesktopExperience = ({ onSwitch, apiKey, onOpenApi }) => {
   const [showEditor, setShowEditor] = useState(false);
   const [showPipeline, setShowPipeline] = useState(false);
   const [pendingDoc, setPendingDoc] = useState(null);
+  const [pipelineError, setPipelineError] = useState('');
   const [documentData, setDocumentData] = useState({
     text: INITIAL_TEXT,
     issues: INITIAL_ISSUES,
@@ -1204,6 +1290,7 @@ const DesktopExperience = ({ onSwitch, apiKey, onOpenApi }) => {
     setShowUpload(false);
     setActiveTab('analysis');
     setPendingDoc(data);
+    setPipelineError('');
     setShowPipeline(true);
   };
 
@@ -1225,19 +1312,24 @@ const DesktopExperience = ({ onSwitch, apiKey, onOpenApi }) => {
       {showPipeline && pendingDoc && (
         <MultiStageLoader
           isDark={isDark}
+          apiKey={apiKey}
+          doc={pendingDoc}
+          onOpenApi={onOpenApi}
           onCancel={() => {
+            setPipelineError('Анализ прерван. Проверьте ключ или формат файла.');
             setShowPipeline(false);
             setPendingDoc(null);
           }}
-          onComplete={() => {
+          onComplete={(result) => {
             setDocumentData({
               text: pendingDoc.text,
-              issues: pendingDoc.issues,
+              issues: result.issues,
               name: pendingDoc.name,
-              pipeline: buildPipelineResult(pendingDoc.text, pendingDoc.issues),
+              pipeline: result.pipeline,
             });
             setShowPipeline(false);
             setPendingDoc(null);
+            setPipelineError('');
           }}
         />
       )}
@@ -1320,6 +1412,7 @@ const DesktopExperience = ({ onSwitch, apiKey, onOpenApi }) => {
             documentData={documentData}
             onEdit={() => setShowEditor(true)}
             apiKey={apiKey}
+            pipelineError={pipelineError}
           />
         )}
       </main>
