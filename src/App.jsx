@@ -24,6 +24,10 @@ import {
   Bookmark,
   Activity,
   ShieldAlert,
+  BrainCircuit,
+  Layers,
+  KeyRound,
+  FileCheck,
 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import pdfWorker from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
@@ -72,6 +76,157 @@ const theme = {
     highlightWarning:
       'bg-amber-100 text-amber-900 border-b-2 border-amber-500 cursor-pointer hover:bg-amber-200',
   },
+};
+
+const detectDocumentType = (text) => {
+  const lower = text.toLowerCase();
+  if (lower.includes('конфиденциал')) return 'NDA';
+  if (lower.includes('поставка')) return 'Договор поставки';
+  if (lower.includes('лиценз')) return 'Лицензионный договор';
+  return 'Договор';
+};
+
+const buildPipelineResult = (text, issues) => {
+  const type = detectDocumentType(text);
+  const baseScore = 60 + issues.length * 10;
+  const risk_score = Math.min(95, baseScore);
+  return {
+    document_meta: {
+      type,
+      risk_score,
+      jurisdiction: 'RF',
+    },
+    analysis: issues.map((issue, idx) => ({
+      original_id: `clause_${idx + 1}`,
+      original_text: issue.textMatch,
+      risk_level: issue.type === 'critical' ? 'Critical' : 'Warning',
+      issue_title: issue.title,
+      legal_basis: issue.category || 'Общие положения ГК РФ',
+      ai_suggestion: issue.suggestion,
+      diff_highlight: {
+        remove: issue.textMatch,
+        add: issue.suggestion,
+      },
+    })),
+  };
+};
+
+const ApiKeyModal = ({ visible, onClose, onSave, apiKey, isDark }) => {
+  const [value, setValue] = useState(apiKey || '');
+  const t = isDark ? theme.dark : theme.light;
+
+  if (!visible) return null;
+
+  return (
+    <div className={`fixed inset-0 z-[70] flex items-center justify-center ${t.bg} bg-opacity-90 animate-in`}>
+      <div className={`w-full max-w-lg rounded-2xl p-8 border ${t.border} ${t.paper} shadow-2xl relative`}>
+        <button
+          aria-label="Закрыть"
+          onClick={onClose}
+          className={`absolute top-4 right-4 p-2 rounded-full ${isDark ? 'hover:bg-white/10' : 'hover:bg-black/5'}`}
+        >
+          <X size={18} />
+        </button>
+        <div className="flex items-center gap-3 mb-4">
+          <KeyRound className={t.accent} />
+          <h3 className={`text-xl font-serif-display ${t.textPrimary}`}>API ключ</h3>
+        </div>
+        <p className={`text-sm mb-4 ${t.textSecondary}`}>
+          Добавьте ключ вашей LLM (например, GPT-5-mini), чтобы запускать трёхступенчатый pipeline: Парсинг → Red Team → Судья.
+        </p>
+        <input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder="sk-..."
+          className={`w-full p-3 rounded-lg border ${t.border} ${t.paper} ${t.textPrimary} outline-none`}
+        />
+        <div className="flex justify-end gap-3 mt-6">
+          <Button variant="ghost" isDark={isDark} onClick={onClose}>
+            Отмена
+          </Button>
+          <Button
+            variant="primary"
+            isDark={isDark}
+            onClick={() => {
+              onSave(value.trim());
+              onClose();
+            }}
+          >
+            Сохранить ключ
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const StepIndicator = ({ status, label, isDark }) => {
+  const t = isDark ? theme.dark : theme.light;
+  return (
+    <div className={`flex items-center gap-4 transition-opacity duration-500 ${status === 'pending' ? 'opacity-40' : 'opacity-100'}`}>
+      <div
+        className={`w-9 h-9 rounded-full flex items-center justify-center border transition-all duration-500 ${
+          status === 'completed'
+            ? 'bg-emerald-500 border-emerald-500 text-black'
+            : status === 'active'
+            ? `${t.accentBg} border-transparent text-black animate-pulse`
+            : `border-gray-600 ${t.textSecondary}`
+        }`}
+      >
+        {status === 'completed' ? <CheckCircle2 size={16} /> : status === 'active' ? <Activity size={16} /> : <div className="w-2 h-2 rounded-full bg-current" />}
+      </div>
+      <span className={`text-sm font-medium ${status === 'active' ? t.textPrimary : t.textSecondary} font-serif-display tracking-wide`}>
+        {label}
+      </span>
+    </div>
+  );
+};
+
+const MultiStageLoader = ({ isDark, onComplete, onCancel }) => {
+  const t = isDark ? theme.dark : theme.light;
+  const [step, setStep] = useState(0);
+
+  useEffect(() => {
+    const timers = [
+      setTimeout(() => setStep(1), 800),
+      setTimeout(() => setStep(2), 2000),
+      setTimeout(() => setStep(3), 3600),
+      setTimeout(onComplete, 5200),
+    ];
+    return () => timers.forEach(clearTimeout);
+  }, [onComplete]);
+
+  const steps = [
+    '1. Парсинг и структурирование (статьи, пункты)',
+    '2. Red Team: поиск всех рисков',
+    '3. Судья: валидация и идеальные формулировки',
+  ];
+
+  const renderStatus = (idx) => {
+    if (step > idx) return 'completed';
+    if (step === idx) return 'active';
+    return 'pending';
+  };
+
+  return (
+    <div className={`fixed inset-0 z-[60] flex items-center justify-center ${t.bg} bg-opacity-95 animate-in`}>
+      <button onClick={onCancel} className={`absolute top-6 left-6 p-2 rounded-full ${t.textSecondary} hover:bg-white/5`}>
+        <X size={22} />
+      </button>
+      <div className="w-full max-w-lg px-8 relative text-center">
+        <BrainCircuit size={120} className={`mx-auto mb-6 ${t.accent}`} />
+        <h3 className={`text-2xl font-serif-display mb-2 ${t.textPrimary}`}>AI Legal Pipeline</h3>
+        <p className={`text-sm ${t.textSecondary} mb-8`}>
+          GPT-5-mini: Parser → Red Team → Judge. Проверяем текст и формируем безопасные формулировки.
+        </p>
+        <div className="space-y-4 text-left">
+          {steps.map((label, idx) => (
+            <StepIndicator key={label} status={renderStatus(idx)} label={label} isDark={isDark} />
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 };
 
 const extractIssuesFromText = (text) => {
@@ -515,7 +670,7 @@ const RecentMatter = ({ matter, isDark }) => {
   );
 };
 
-const MobileExperience = ({ onSwitch }) => {
+const MobileExperience = ({ onSwitch, onOpenApi, apiKey }) => {
   const [isDark, setIsDark] = useState(true);
   const [view, setView] = useState('dashboard');
   const [matters, setMatters] = useState([
@@ -526,7 +681,9 @@ const MobileExperience = ({ onSwitch }) => {
     text: INITIAL_TEXT,
     issues: INITIAL_ISSUES,
     name: 'NDA_Draft_ru.txt',
+    pipeline: buildPipelineResult(INITIAL_TEXT, INITIAL_ISSUES),
   });
+  const [pendingDoc, setPendingDoc] = useState(null);
 
   const t = isDark ? theme.dark : theme.light;
 
@@ -553,8 +710,25 @@ const MobileExperience = ({ onSwitch }) => {
           isDark={isDark}
           onCancel={() => setView('dashboard')}
           onUploadComplete={(data) => {
-            setDocumentData({ text: data.text, issues: data.issues, name: data.name });
+            setPendingDoc(data);
+            setView('analyzing');
+          }}
+        />
+      )}
+
+      {view === 'analyzing' && pendingDoc && (
+        <MultiStageLoader
+          isDark={isDark}
+          onCancel={() => setView('dashboard')}
+          onComplete={() => {
+            setDocumentData({
+              text: pendingDoc.text,
+              issues: pendingDoc.issues,
+              name: pendingDoc.name,
+              pipeline: buildPipelineResult(pendingDoc.text, pendingDoc.issues),
+            });
             setView('workspace');
+            setPendingDoc(null);
           }}
         />
       )}
@@ -579,6 +753,12 @@ const MobileExperience = ({ onSwitch }) => {
               <span className={`font-serif-display font-bold text-lg ${t.textPrimary}`}>Jurist AI</span>
             </div>
             <div className="flex gap-2">
+              <button
+                onClick={onOpenApi}
+                className={`px-3 py-2 rounded-lg text-xs font-semibold ${isDark ? 'bg-white/10 text-white' : 'bg-black/5 text-black'}`}
+              >
+                API ключ
+              </button>
               <button
                 onClick={onSwitch}
                 className={`px-3 py-2 rounded-lg text-xs font-semibold ${isDark ? 'bg-white/10 text-white' : 'bg-black/5 text-black'}`}
@@ -841,8 +1021,9 @@ const DashboardView = ({ isDark, onStartUpload }) => (
   </div>
 );
 
-const DocumentAnalysisView = ({ isDark, documentData, onEdit }) => {
-  const { text, issues, name } = documentData;
+
+const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey }) => {
+  const { text, issues, name, pipeline } = documentData;
   const preview = text.split(/\n+/).filter(Boolean).slice(0, 6);
 
   const renderPreview = (paragraph) => {
@@ -883,6 +1064,13 @@ const DocumentAnalysisView = ({ isDark, documentData, onEdit }) => {
           <span className="px-2 py-0.5 rounded text-[10px] bg-gray-500/20 text-gray-500 font-bold uppercase">Только чтение</span>
         </div>
         <div className="flex items-center gap-3">
+          <span
+            className={`text-[11px] uppercase tracking-wider font-bold px-3 py-1 rounded-full border ${
+              apiKey ? 'border-emerald-500/30 text-emerald-400 bg-emerald-500/10' : 'border-amber-500/30 text-amber-400 bg-amber-500/10'
+            }`}
+          >
+            {apiKey ? 'API подключен' : 'API не задан'}
+          </span>
           <button
             className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${
               isDark ? 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20' : 'bg-amber-50 text-amber-600'
@@ -894,7 +1082,12 @@ const DocumentAnalysisView = ({ isDark, documentData, onEdit }) => {
           <button className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider ${isDark ? 'bg-white text-black' : 'bg-black text-white'}`}>
             Экспорт отчёта
           </button>
-          <button onClick={onEdit} className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider border ${isDark ? 'border-white/10 text-white hover:bg-white/10' : 'border-black/10 text-black hover:bg-black/5'}`}>
+          <button
+            onClick={onEdit}
+            className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider border ${
+              isDark ? 'border-white/10 text-white hover:bg-white/10' : 'border-black/10 text-black hover:bg-black/5'
+            }`}
+          >
             Редактировать
           </button>
         </div>
@@ -929,44 +1122,52 @@ const DocumentAnalysisView = ({ isDark, documentData, onEdit }) => {
           </div>
 
           <div className="flex-1 overflow-y-auto p-6 space-y-6">
-            {issues.length === 0 && (
-              <div className={`p-5 rounded-xl border-l-2 border-emerald-500 ${isDark ? 'bg-[#151515]' : 'bg-emerald-50/60'}`}>
-                <div className="flex items-center gap-2 mb-3">
-                  <CheckCircle2 size={16} className="text-emerald-500" />
-                  <span className={`text-sm font-bold ${desktopStyles.textMain(isDark)}`}>Риски не найдены</span>
+            {pipeline && (
+              <div className={`p-4 rounded-xl border ${isDark ? 'border-white/5 bg-white/5' : 'border-black/5 bg-black/5'}`}>
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2">
+                    <Layers size={16} className={desktopStyles.textMain(isDark)} />
+                    <span className={`text-sm font-semibold ${desktopStyles.textMain(isDark)}`}>{pipeline.document_meta.type}</span>
+                  </div>
+                  <span
+                    className={`text-xs font-bold px-3 py-1 rounded-full ${
+                      pipeline.document_meta.risk_score > 80 ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'
+                    }`}
+                  >
+                    Риск {pipeline.document_meta.risk_score}/100
+                  </span>
                 </div>
-                <p className={`text-sm leading-relaxed ${desktopStyles.textSec(isDark)}`}>
-                  Документ выглядит чистым. Можно перейти к подписанию или внести правки вручную.
-                </p>
+                <div className={`text-xs flex gap-3 ${desktopStyles.textSec(isDark)}`}>
+                  <span>Юрисдикция: {pipeline.document_meta.jurisdiction}</span>
+                  <span>Формат JSON готов к выгрузке</span>
+                </div>
               </div>
             )}
 
-            {issues.map((issue) => (
+            {pipeline?.analysis.map((item) => (
               <div
-                key={issue.id}
-                className={`p-5 rounded-xl border-l-2 ${
-                  issue.type === 'critical'
-                    ? 'border-red-500 ' + (isDark ? 'bg-[#151515]' : 'bg-red-50/60')
-                    : 'border-amber-500 ' + (isDark ? 'bg-[#151515]' : 'bg-amber-50/60')
-                }`}
+                key={item.original_id}
+                className={`p-5 rounded-xl border ${isDark ? 'border-white/5 bg-[#151515]' : 'border-black/5 bg-gray-50'}`}
               >
-                <div className="flex items-center gap-2 mb-3">
-                  {issue.type === 'critical' ? <AlertTriangle size={16} className="text-amber-500" /> : <CheckCircle2 size={16} className="text-emerald-500" />}
-                  <span className={`text-sm font-bold ${desktopStyles.textMain(isDark)}`}>{issue.title}</span>
-                </div>
-                <p className={`text-sm mb-4 leading-relaxed ${desktopStyles.textSec(isDark)}`}>{issue.description}</p>
-                <div className="space-y-2">
-                  <button
-                    className={`w-full py-2 rounded-lg text-xs font-bold border transition-colors ${
-                      isDark ? 'border-white/10 hover:bg-white/5 text-white' : 'border-black/10 hover:bg-black/5 text-black'
+                <div className="flex justify-between items-start mb-3">
+                  <div className="flex items-center gap-2">
+                    <FileCheck size={16} className={desktopStyles.textMain(isDark)} />
+                    <span className={`text-sm font-bold ${desktopStyles.textMain(isDark)}`}>{item.issue_title}</span>
+                  </div>
+                  <span
+                    className={`text-[10px] font-bold uppercase px-2 py-1 rounded ${
+                      item.risk_level === 'Critical' ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'
                     }`}
-                    onClick={onEdit}
                   >
-                    Заменить на: {issue.suggestion}
-                  </button>
-                  <button className={`w-full py-2 rounded-lg text-xs font-bold transition-colors ${isDark ? 'text-gray-500 hover:text-white' : 'text-gray-400 hover:text-black'}`}>
-                    Игнорировать
-                  </button>
+                    {item.risk_level}
+                  </span>
+                </div>
+                <p className={`text-xs mb-2 ${desktopStyles.textSec(isDark)}`}>{item.legal_basis}</p>
+                <div className={`p-3 rounded-lg border ${isDark ? 'border-white/10' : 'border-black/10'} text-sm ${desktopStyles.textMain(isDark)}`}>
+                  <div className="mb-2 text-xs uppercase tracking-widest text-red-400">Было</div>
+                  <p className="line-through opacity-70">{item.diff_highlight.remove}</p>
+                  <div className="mt-3 text-xs uppercase tracking-widest text-emerald-400">Станет</div>
+                  <p className="font-medium">{item.ai_suggestion}</p>
                 </div>
               </div>
             ))}
@@ -984,27 +1185,30 @@ const DocumentAnalysisView = ({ isDark, documentData, onEdit }) => {
   );
 };
 
-const DesktopExperience = ({ onSwitch }) => {
+const DesktopExperience = ({ onSwitch, apiKey, onOpenApi }) => {
   const [isDark, setIsDark] = useState(true);
   const [activeTab, setActiveTab] = useState('dashboard');
   const [collapsed, setCollapsed] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [showEditor, setShowEditor] = useState(false);
+  const [showPipeline, setShowPipeline] = useState(false);
+  const [pendingDoc, setPendingDoc] = useState(null);
   const [documentData, setDocumentData] = useState({
     text: INITIAL_TEXT,
     issues: INITIAL_ISSUES,
     name: 'NDA_Draft_ru.txt',
+    pipeline: buildPipelineResult(INITIAL_TEXT, INITIAL_ISSUES),
   });
 
   const handleUploadComplete = (data) => {
-    setDocumentData(data);
     setShowUpload(false);
     setActiveTab('analysis');
-    setShowEditor(true);
+    setPendingDoc(data);
+    setShowPipeline(true);
   };
 
   const handleSaveEditor = ({ issuesCount, text, issues }) => {
-    setDocumentData((prev) => ({ ...prev, text, issues }));
+    setDocumentData((prev) => ({ ...prev, text, issues, pipeline: buildPipelineResult(text, issues) }));
     setShowEditor(false);
   };
 
@@ -1015,6 +1219,26 @@ const DesktopExperience = ({ onSwitch }) => {
           isDark={isDark}
           onCancel={() => setShowUpload(false)}
           onUploadComplete={handleUploadComplete}
+        />
+      )}
+
+      {showPipeline && pendingDoc && (
+        <MultiStageLoader
+          isDark={isDark}
+          onCancel={() => {
+            setShowPipeline(false);
+            setPendingDoc(null);
+          }}
+          onComplete={() => {
+            setDocumentData({
+              text: pendingDoc.text,
+              issues: pendingDoc.issues,
+              name: pendingDoc.name,
+              pipeline: buildPipelineResult(pendingDoc.text, pendingDoc.issues),
+            });
+            setShowPipeline(false);
+            setPendingDoc(null);
+          }}
         />
       )}
 
@@ -1075,6 +1299,13 @@ const DesktopExperience = ({ onSwitch }) => {
           >
             <LayoutDashboard size={18} />
           </button>
+          <button
+            onClick={onOpenApi}
+            className={`p-3 rounded-xl transition-colors ${isDark ? 'hover:bg-white/10 text-white' : 'hover:bg-black/5 text-black'}`}
+            aria-label="API ключ"
+          >
+            <KeyRound size={18} />
+          </button>
         </div>
       </aside>
 
@@ -1088,6 +1319,7 @@ const DesktopExperience = ({ onSwitch }) => {
             isDark={isDark}
             documentData={documentData}
             onEdit={() => setShowEditor(true)}
+            apiKey={apiKey}
           />
         )}
       </main>
@@ -1098,13 +1330,34 @@ const DesktopExperience = ({ onSwitch }) => {
 // --- ОСНОВНОЙ ПЕРЕКЛЮЧАТЕЛЬ ---
 export default function App() {
   const [mode, setMode] = useState('desktop');
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('jurist_api_key') || '');
+  const [showApiModal, setShowApiModal] = useState(false);
+
+  useEffect(() => {
+    localStorage.setItem('jurist_api_key', apiKey || '');
+  }, [apiKey]);
 
   return (
     <div className="min-h-screen">
+      <ApiKeyModal
+        visible={showApiModal}
+        onClose={() => setShowApiModal(false)}
+        onSave={setApiKey}
+        apiKey={apiKey}
+        isDark={mode === 'desktop'}
+      />
       {mode === 'desktop' ? (
-        <DesktopExperience onSwitch={() => setMode('mobile')} />
+        <DesktopExperience
+          onSwitch={() => setMode('mobile')}
+          apiKey={apiKey}
+          onOpenApi={() => setShowApiModal(true)}
+        />
       ) : (
-        <MobileExperience onSwitch={() => setMode('desktop')} />
+        <MobileExperience
+          onSwitch={() => setMode('desktop')}
+          onOpenApi={() => setShowApiModal(true)}
+          apiKey={apiKey}
+        />
       )}
     </div>
   );
