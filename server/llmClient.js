@@ -2,19 +2,42 @@ const MAX_RETRIES = 2;
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const extractText = (data) => {
-  if (!data) return '';
-  if (data.output_text) return data.output_text;
+const extractText = (data, log) => {
+  if (!data) return { text: '', types: [] };
+
+  const types = [];
+  if (data.output_text) {
+    types.push('output_text');
+    return { text: data.output_text, types };
+  }
+
   if (Array.isArray(data.output)) {
-    return data.output
-      .flatMap((item) => item?.content || [])
-      .map((c) => c?.text || '')
-      .join('');
+    const parts = data.output.flatMap((item) => {
+      if (!item?.content) return [];
+      return item.content.map((c) => {
+        if (!c) return '';
+        if (c.json) {
+          types.push(`content:${c.type || 'json'}`);
+          try {
+            return JSON.stringify(c.json);
+          } catch (e) {
+            return '';
+          }
+        }
+        types.push(`content:${c.type || 'text'}`);
+        return c.text || '';
+      });
+    });
+    return { text: parts.join(''), types };
   }
+
   if (Array.isArray(data.choices)) {
-    return data.choices[0]?.message?.content || '';
+    types.push('choices');
+    return { text: data.choices[0]?.message?.content || '', types };
   }
-  return '';
+
+  log?.('info', 'LLM ответ без извлекаемого контента', { keys: Object.keys(data || {}) });
+  return { text: '', types };
 };
 
 export const callResponses = async ({ system, user, apiKey, model = 'gpt-5-mini', maxOutputTokens = 1200, topP = 1, log }) => {
@@ -51,9 +74,12 @@ export const callResponses = async ({ system, user, apiKey, model = 'gpt-5-mini'
     }
 
     if (response.ok) {
-      const content = extractText(parsed);
-      log?.('info', 'LLM ответ получен', { raw: content?.slice(0, 400) || 'пусто' });
-      return content;
+      const { text, types } = extractText(parsed, log);
+      log?.('info', 'LLM ответ получен', {
+        raw: text?.slice(0, 400) || 'пусто',
+        contentTypes: types,
+      });
+      return text;
     }
 
     log?.('error', 'Ответ LLM вернул ошибку', { status: response.status, body: bodyText.slice(0, 400) });

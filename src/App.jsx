@@ -115,7 +115,6 @@ const DEFAULT_LLM_SETTINGS = {
   model: 'gpt-5-mini',
   maxTokens: 1200,
   topP: 1,
-  temperature: 1,
 };
 
 const runPipeline = async ({ text, issues, apiKey, log, settings, onStage }) => {
@@ -235,7 +234,6 @@ const AdminPanel = ({ visible, onClose, isDark, apiKey, onSaveKey, settings, onS
   const [localKey, setLocalKey] = useState(apiKey || '');
   const [localSettings, setLocalSettings] = useState({
     model: settings?.model || DEFAULT_LLM_SETTINGS.model,
-    temperature: settings?.temperature ?? DEFAULT_LLM_SETTINGS.temperature,
     maxTokens: settings?.maxTokens ?? DEFAULT_LLM_SETTINGS.maxTokens,
     topP: settings?.topP ?? DEFAULT_LLM_SETTINGS.topP,
   });
@@ -247,7 +245,6 @@ const AdminPanel = ({ visible, onClose, isDark, apiKey, onSaveKey, settings, onS
   useEffect(() => {
     setLocalSettings({
       model: settings?.model || DEFAULT_LLM_SETTINGS.model,
-      temperature: settings?.temperature ?? DEFAULT_LLM_SETTINGS.temperature,
       maxTokens: settings?.maxTokens ?? DEFAULT_LLM_SETTINGS.maxTokens,
       topP: settings?.topP ?? DEFAULT_LLM_SETTINGS.topP,
     });
@@ -270,7 +267,7 @@ const AdminPanel = ({ visible, onClose, isDark, apiKey, onSaveKey, settings, onS
           <h3 className={`text-xl font-serif-display ${t.textPrimary}`}>Админка LLM</h3>
         </div>
         <p className={`text-sm mb-6 ${t.textSecondary}`}>
-          Управляйте ключами и параметрами запросов к GPT (модель, температура, max tokens, top-p). Настройки сохраняются локально
+          Управляйте ключами и параметрами запросов к GPT (модель, max tokens, top-p). Настройки сохраняются локально
           и применяются ко всем шагам пайплайна.
         </p>
 
@@ -317,27 +314,6 @@ const AdminPanel = ({ visible, onClose, isDark, apiKey, onSaveKey, settings, onS
             />
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className={`text-xs uppercase tracking-widest font-bold ${t.textSecondary}`}>Температура</label>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={localSettings.temperature}
-                  disabled={localSettings.model?.startsWith('gpt-5-mini')}
-                  onChange={(e) => setLocalSettings((s) => ({ ...s, temperature: Number(e.target.value) }))}
-                  className="w-full"
-                />
-                <div className={`text-sm ${t.textPrimary}`}>
-                  {localSettings.temperature}
-                  {localSettings.model?.startsWith('gpt-5-mini') && (
-                    <span className={`ml-2 text-xs ${t.textSecondary}`}>
-                      Для gpt-5-mini температура фиксирована, параметр не отправляется
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div>
                 <label className={`text-xs uppercase tracking-widest font-bold ${t.textSecondary}`}>Top P</label>
                 <input
                   type="range"
@@ -375,8 +351,8 @@ const AdminPanel = ({ visible, onClose, isDark, apiKey, onSaveKey, settings, onS
         <div className={`mt-4 text-xs ${t.textSecondary}`}>
           Настройки применяются к шагам: парсер → red team → судья. Для gpt-5-mini используется параметр
           <span className="font-semibold"> max_completion_tokens</span>, поэтому численное значение сохраняется, но передается в
-          актуальном поле. Для gpt-5-mini температура зафиксирована провайдером (параметр не отправляется вручную), поэтому для
-          экономии токенов используйте лимит и top-p.
+          актуальном поле. Для gpt-5-mini температура фиксирована провайдером и не отправляется, поэтому для контроля детерминизма
+          используйте лимит токенов и top-p.
         </div>
       </div>
     </div>

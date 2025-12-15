@@ -48,7 +48,7 @@ const sanitizeRisks = (risks = []) =>
   }));
 
 const analyzeChunks = async ({ chunks, apiKey, options, log }) => {
-  const local = [];
+  const aggregates = { risks: [], missing: [], redflags: [] };
   for (let idx = 0; idx < chunks.length; idx += 1) {
     const chunk = chunks[idx];
     log?.('info', 'LLM анализ чанка', { id: chunk.id, length: chunk.text.length });
@@ -65,7 +65,7 @@ const analyzeChunks = async ({ chunks, apiKey, options, log }) => {
     if (json?.risks?.length) {
       json.risks.forEach((r, i) => {
         const locChunk = Number.isFinite(Number(r.location?.chunk)) ? Number(r.location.chunk) : idx;
-        local.push({
+        aggregates.risks.push({
           ...r,
           id: r.id || `${chunk.id}_r${i + 1}`,
           location: {
@@ -77,8 +77,16 @@ const analyzeChunks = async ({ chunks, apiKey, options, log }) => {
         });
       });
     }
+    if (json?.missing?.length) {
+      aggregates.missing.push(...json.missing);
+    }
+    if (json?.redflags?.length) {
+      aggregates.redflags.push(
+        ...json.redflags.map((r) => ({ ...r, quote: trimQuote(r.quote || '') }))
+      );
+    }
   }
-  return local;
+  return aggregates;
 };
 
 const attemptRepair = async ({ payload, apiKey, options, log, attempts = 2 }) => {
@@ -123,13 +131,15 @@ export const analyzeDocument = async ({ text, apiKey, options = {}, log = consol
   steps[1].status = 'done';
 
   steps[2].status = 'running';
-  const chunkRisks = await analyzeChunks({ chunks, apiKey, options, log });
+  const chunkFindings = await analyzeChunks({ chunks, apiKey, options, log });
 
   const judgeAnswer = await callResponses({
     system: judgePrompt,
     user: JSON.stringify({
       chunks: chunks.map((c, idx) => ({ id: idx, start: c.start, end: c.end, text: c.text.slice(0, 1600) })),
-      risks: sanitizeRisks(chunkRisks),
+      risks: sanitizeRisks(chunkFindings.risks),
+      missing: chunkFindings.missing || [],
+      redflags: chunkFindings.redflags || [],
     }).slice(0, 12000),
     apiKey,
     model: options?.model || 'gpt-5-mini',
@@ -159,12 +169,14 @@ export const analyzeDocument = async ({ text, apiKey, options = {}, log = consol
 
   const data = validated.data;
   const finalRisks = sanitizeRisks(data.risks).map((r) => ({ ...r, quote: trimQuote(r.quote || '') }));
+  const finalRedflags = (data.redflags || []).map((r) => ({ ...r, quote: trimQuote(r.quote || '') }));
 
   steps[3].status = 'done';
 
   return {
     ...data,
     risks: finalRisks,
+    redflags: finalRedflags,
     meta: {
       ...(data.meta || {}),
       model: options?.model || 'gpt-5-mini',
