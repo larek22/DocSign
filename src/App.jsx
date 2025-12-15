@@ -90,145 +90,32 @@ const buildPipelineResult = (text, issues) => {
   const type = detectDocumentType(text);
   const baseScore = 60 + issues.length * 10;
   const risk_score = Math.min(95, baseScore);
+  const risks = issues.map((issue, idx) => ({
+    id: `risk_${idx + 1}`,
+    severity: issue.type === 'critical' ? 'high' : 'medium',
+    category: issue.category || 'other',
+    title: issue.title,
+    why: issue.description,
+    quote: issue.textMatch,
+    fix: { action: issue.suggestion },
+    confidence: 0.5,
+  }));
   return {
-    document_meta: {
+    doc: {
       type,
-      risk_score,
-      jurisdiction: 'RF',
+      lang: 'ru',
+      confidence: 0.5,
     },
-    analysis: issues.map((issue, idx) => ({
-      original_id: `clause_${idx + 1}`,
-      original_text: issue.textMatch,
-      risk_level: issue.type === 'critical' ? 'Critical' : 'Warning',
-      issue_title: issue.title,
-      legal_basis: issue.category || 'Общие положения ГК РФ',
-      ai_suggestion: issue.suggestion,
-      diff_highlight: {
-        remove: issue.textMatch,
-        add: issue.suggestion,
-      },
-    })),
+    risks,
+    meta: { model: 'gpt-5-mini', chunks: 1, risk_score },
   };
 };
 
 const DEFAULT_LLM_SETTINGS = {
   model: 'gpt-5-mini',
-  temperature: 0.2,
   maxTokens: 1200,
   topP: 1,
-};
-
-const callLLM = async ({ system, user, apiKey, log, settings }) => {
-  const model = settings?.model?.trim() || DEFAULT_LLM_SETTINGS.model;
-  const rawTemperature = Number(settings?.temperature ?? DEFAULT_LLM_SETTINGS.temperature);
-  const max_tokens = settings?.maxTokens ? Number(settings.maxTokens) : undefined;
-  const top_p = settings?.topP ? Number(settings.topP) : undefined;
-
-  const isGpt5Mini = model?.startsWith('gpt-5-mini');
-  const useResponsesApi = isGpt5Mini; // для gpt-5-mini используем Responses API и не отправляем temperature
-  const temperature = !isGpt5Mini && !Number.isNaN(rawTemperature) ? rawTemperature : undefined;
-  if (isGpt5Mini && rawTemperature !== undefined) {
-    log?.('info', 'Температура не отправлена для gpt-5-mini: модель использует встроенное значение', {
-      requested: rawTemperature,
-    });
-  }
-
-  // responses API ожидает max_output_tokens, chat completions — max_tokens / max_completion_tokens
-  const tokenField = useResponsesApi
-    ? 'max_output_tokens'
-    : model?.startsWith('gpt-5')
-    ? 'max_completion_tokens'
-    : 'max_tokens';
-
-  const payload = useResponsesApi
-    ? {
-        model,
-        input: [
-          { role: 'system', content: [{ type: 'input_text', text: system }] },
-          { role: 'user', content: [{ type: 'input_text', text: user }] },
-        ],
-        ...(typeof max_tokens === 'number' && !Number.isNaN(max_tokens)
-          ? { [tokenField]: max_tokens }
-          : {}),
-        ...(typeof top_p === 'number' && !Number.isNaN(top_p) ? { top_p } : {}),
-      }
-    : {
-        model,
-        messages: [
-          { role: 'system', content: system },
-          { role: 'user', content: user },
-        ],
-        ...(!isGpt5Mini && temperature !== undefined ? { temperature } : {}),
-        ...(typeof max_tokens === 'number' && !Number.isNaN(max_tokens)
-          ? { [tokenField]: max_tokens }
-          : {}),
-        ...(typeof top_p === 'number' && !Number.isNaN(top_p) ? { top_p } : {}),
-      };
-
-  log?.('info', `LLM запрос (${model})`, {
-    ...payload,
-    messages: undefined,
-    input: undefined,
-  });
-
-  const response = await fetch(useResponsesApi ? 'https://api.openai.com/v1/responses' : 'https://api.openai.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const text = await response.text();
-    log?.('error', 'Ответ LLM вернул ошибку', { status: response.status, body: text });
-    throw new Error(`LLM ответ ${response.status}: ${text.slice(0, 200)}`);
-  }
-
-  const data = await response.json();
-
-  const extractText = () => {
-    if (data?.output_text) return data.output_text;
-    if (Array.isArray(data?.output)) {
-      return data.output
-        .flatMap((item) => item?.content || [])
-        .map((c) => c?.text || '')
-        .join('');
-    }
-    return data?.choices?.[0]?.message?.content;
-  };
-
-  const content = extractText();
-  log?.('info', 'LLM ответ получен', { content: content?.slice(0, 400) || 'пусто' });
-  return content;
-};
-
-const stripCodeFence = (raw = '') => {
-  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  if (fenced?.[1]) return fenced[1];
-  return raw.replace(/^```[a-zA-Z]*\s*/i, '').replace(/```$/i, '');
-};
-
-const safeJSON = (str, log) => {
-  if (!str) return { data: null, raw: '' };
-  const normalized = (() => {
-    const fenced = stripCodeFence(str.trim());
-    const first = fenced.indexOf('{');
-    const last = fenced.lastIndexOf('}');
-    if (first !== -1 && last !== -1 && last > first) return fenced.slice(first, last + 1);
-    return fenced;
-  })();
-
-  try {
-    return { data: JSON.parse(normalized), raw: normalized };
-  } catch (error) {
-    log?.('error', 'Не удалось распарсить JSON из ответа LLM', {
-      message: error.message,
-      snippet: normalized.slice(0, 400),
-    });
-    return { data: null, raw: normalized, error };
-  }
+  temperature: 1,
 };
 
 const runPipeline = async ({ text, issues, apiKey, log, settings }) => {
@@ -241,65 +128,49 @@ const runPipeline = async ({ text, issues, apiKey, log, settings }) => {
   }
 
   const finalIssues = issues?.length ? issues : extractIssuesFromText(text);
+  const payload = {
+    text: text.slice(0, 60000),
+    options: {
+      model: settings?.model || DEFAULT_LLM_SETTINGS.model,
+      maxTokens: settings?.maxTokens || DEFAULT_LLM_SETTINGS.maxTokens,
+      topP: settings?.topP || DEFAULT_LLM_SETTINGS.topP,
+    },
+  };
 
-  const parserPrompt = `Ты — AI-ассистент, специализирующийся на юридической структуре документов. Твоя задача: разбить входящий текст договора на логические блоки (Статьи/Пункты). Игнорируй колонтитулы и номера страниц. Определи тип документа (NDA, Договор поставки, Лицензионный договор). Выдели "Существенные условия" (Essential Terms) для данного типа договора согласно ГК РФ. Верни результат в формате JSON, где каждый пункт имеет ID и чистый текст.`;
-  const riskPrompt = `Ты — беспощадный старший юрист (Senior Associate) в топовой юридической фирме, защищающий интересы Исполнителя. Тебе переданы структурированные пункты договора в JSON. Найди любые условия, которые противоречат ГК РФ, создают финансовые риски, кабальны или двояко трактуются. Формат мысли: Цитата / Почему это плохо / Ссылка на закон / Вердикт (Критично/Внимание). Верни краткий список рисков в JSON.`;
-  const judgePrompt = `Ты — Партнер юридической фирмы и главный редактор. Проверь список рисков младшего юриста. Удали ложные срабатывания, оставь только влияющие на бизнес. Для каждого подтверджённого риска предложи идеальную формулировку (Gold Standard Clause) с компромиссным тоном для контрагента. Верни результат строго в JSON со структурой: {"document_meta":{...},"analysis":[{original_id,original_text,risk_level,issue_title,legal_basis,ai_suggestion,diff_highlight:{remove,add}}]}.`;
+  log?.('info', 'Отправка документа на серверный анализ', { length: payload.text.length });
 
-  log?.('info', 'Шаг 1: парсинг документа', { length: text.length });
-  const parserAnswer = await callLLM({
-    system: parserPrompt,
-    user: text.slice(0, 12000),
-    apiKey,
-    log,
-    settings,
+  const response = await fetch('/api/analyze', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(apiKey ? { 'x-openai-key': apiKey } : {}),
+    },
+    body: JSON.stringify(payload),
   });
-  const { data: parserJSON } = safeJSON(parserAnswer, log);
-  if (!parserJSON) {
-    throw new Error('LLM не вернул корректный JSON на этапе парсинга.');
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error?.error || 'Серверный анализ не завершён.');
   }
 
-  log?.('info', 'Шаг 2: поиск рисков', { sections: parserJSON?.length || Object.keys(parserJSON || {}).length });
-  const redTeamAnswer = await callLLM({
-    system: riskPrompt,
-    user: JSON.stringify(parserJSON).slice(0, 12000),
-    apiKey,
-    log,
-    settings,
-  });
-  const { data: redTeamJSON } = safeJSON(redTeamAnswer, log);
-  if (!redTeamJSON) {
-    throw new Error('LLM не вернул корректный JSON на этапе поиска рисков.');
-  }
+  const data = await response.json();
+  log?.('info', 'Pipeline завершён на сервере', { risks: data?.risks?.length || 0, chunks: data?.meta?.chunks });
 
-  log?.('info', 'Шаг 3: финальный судья', { risks: Array.isArray(redTeamJSON) ? redTeamJSON.length : Object.keys(redTeamJSON || {}).length });
-  const judgeAnswer = await callLLM({
-    system: judgePrompt,
-    user: JSON.stringify(redTeamJSON).slice(0, 12000),
-    apiKey,
-    log,
-    settings,
-  });
-  const { data: judgeJSON } = safeJSON(judgeAnswer, log);
-  if (!judgeJSON?.analysis) {
-    log?.('error', 'Этап судьи вернул неожиданный формат', {
-      judgeAnswer: judgeAnswer?.slice(0, 500),
-    });
-    throw new Error('LLM не смог собрать финальный JSON. Проверьте логи.');
-  }
+  const mappedIssues = Array.isArray(data?.risks)
+    ? data.risks.map((risk, idx) => ({
+        id: risk.id || `risk-${idx + 1}`,
+        type: risk.severity === 'high' ? 'critical' : 'warning',
+        textMatch: risk.quote || 'Фрагмент не указан',
+        title: risk.title || 'Риск',
+        description: risk.why || 'Проверьте формулировку',
+        suggestion: risk.fix?.proposed_text || risk.fix?.action || '',
+        category: risk.category || 'Общие положения',
+      }))
+    : finalIssues;
 
-  log?.('info', 'Pipeline завершён', { analysis: judgeJSON.analysis?.length || 0 });
   return {
-    pipeline: judgeJSON,
-    issues: judgeJSON.analysis?.map((item, idx) => ({
-      id: item.original_id || `issue-${idx + 1}`,
-      type: item.risk_level?.toLowerCase() === 'critical' ? 'critical' : 'warning',
-      textMatch: item.diff_highlight?.remove || item.original_text,
-      title: item.issue_title || 'Риск',
-      description: item.legal_basis || 'Проверьте формулировку',
-      suggestion: item.diff_highlight?.add || item.ai_suggestion,
-      category: item.legal_basis || 'Общие положения',
-    })) || finalIssues,
+    pipeline: data,
+    issues: mappedIssues?.length ? mappedIssues : finalIssues,
   };
 };
 
@@ -1596,7 +1467,10 @@ const DocumentAnalysisView = ({
 }) => {
   const { text, issues, name, pipeline } = documentData;
   const preview = text.split(/\n+/).filter(Boolean).slice(0, 6);
-  const hasPipeline = Boolean(pipeline?.analysis?.length);
+  const risks = pipeline?.risks || [];
+  const hasPipeline = Boolean(risks.length);
+  const riskScore = Math.min(95, 50 + risks.length * 10);
+  const docType = pipeline?.doc?.type || detectDocumentType(text);
 
   const renderPreview = (paragraph) => {
     let parts = [{ text: paragraph, type: 'normal', id: null }];
@@ -1646,7 +1520,7 @@ const DocumentAnalysisView = ({
           <span className={`text-[11px] uppercase tracking-wider font-bold px-3 py-1 rounded-full border ${
               isDark ? 'border-white/10 text-white' : 'border-black/10 text-black'
             }`}>
-            {settings?.model || 'gpt-5-mini'} · T={settings?.temperature ?? DEFAULT_LLM_SETTINGS.temperature}
+            {settings?.model || 'gpt-5-mini'} · tokens={settings?.maxTokens || DEFAULT_LLM_SETTINGS.maxTokens}
           </span>
           <button
             onClick={onOpenLogs}
@@ -1747,47 +1621,47 @@ const DocumentAnalysisView = ({
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <Layers size={16} className={desktopStyles.textMain(isDark)} />
-                    <span className={`text-sm font-semibold ${desktopStyles.textMain(isDark)}`}>{pipeline.document_meta.type}</span>
+                    <span className={`text-sm font-semibold ${desktopStyles.textMain(isDark)}`}>{docType}</span>
                   </div>
                   <span
                     className={`text-xs font-bold px-3 py-1 rounded-full ${
-                      pipeline.document_meta.risk_score > 80 ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'
+                      riskScore > 80 ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'
                     }`}
                   >
-                    Риск {pipeline.document_meta.risk_score}/100
+                    Риск {riskScore}/100
                   </span>
                 </div>
                 <div className={`text-xs flex gap-3 ${desktopStyles.textSec(isDark)}`}>
-                  <span>Юрисдикция: {pipeline.document_meta.jurisdiction}</span>
-                  <span>Формат JSON готов к выгрузке</span>
+                  <span>Юрисдикция: {pipeline?.doc?.lang || 'ru'}</span>
+                  <span>Chunks: {pipeline?.meta?.chunks || 1}</span>
                 </div>
               </div>
             )}
 
-            {pipeline?.analysis.map((item) => (
+            {risks.map((item) => (
               <div
-                key={item.original_id}
+                key={item.id}
                 className={`p-5 rounded-xl border ${isDark ? 'border-white/5 bg-[#151515]' : 'border-black/5 bg-gray-50'}`}
               >
                 <div className="flex justify-between items-start mb-3">
                   <div className="flex items-center gap-2">
                     <FileCheck size={16} className={desktopStyles.textMain(isDark)} />
-                    <span className={`text-sm font-bold ${desktopStyles.textMain(isDark)}`}>{item.issue_title}</span>
+                    <span className={`text-sm font-bold ${desktopStyles.textMain(isDark)}`}>{item.title}</span>
                   </div>
                   <span
                     className={`text-[10px] font-bold uppercase px-2 py-1 rounded ${
-                      item.risk_level === 'Critical' ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'
+                      item.severity === 'high' ? 'bg-red-500/10 text-red-400' : 'bg-amber-500/10 text-amber-400'
                     }`}
                   >
-                    {item.risk_level}
+                    {item.severity === 'high' ? 'Critical' : 'Warning'}
                   </span>
                 </div>
-                <p className={`text-xs mb-2 ${desktopStyles.textSec(isDark)}`}>{item.legal_basis}</p>
+                <p className={`text-xs mb-2 ${desktopStyles.textSec(isDark)}`}>{item.why}</p>
                 <div className={`p-3 rounded-lg border ${isDark ? 'border-white/10' : 'border-black/10'} text-sm ${desktopStyles.textMain(isDark)}`}>
                   <div className="mb-2 text-xs uppercase tracking-widest text-red-400">Было</div>
-                  <p className="line-through opacity-70">{item.diff_highlight.remove}</p>
+                  <p className="line-through opacity-70">{item.quote}</p>
                   <div className="mt-3 text-xs uppercase tracking-widest text-emerald-400">Станет</div>
-                  <p className="font-medium">{item.ai_suggestion}</p>
+                  <p className="font-medium">{item.fix?.proposed_text || item.fix?.action || 'Уточните формулировку'}</p>
                 </div>
               </div>
             ))}
