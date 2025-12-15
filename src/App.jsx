@@ -144,8 +144,8 @@ const callLLM = async ({ system, user, apiKey, log, settings }) => {
     ? {
         model,
         input: [
-          { role: 'system', content: [{ type: 'text', text: system }] },
-          { role: 'user', content: [{ type: 'text', text: user }] },
+          { role: 'system', content: [{ type: 'input_text', text: system }] },
+          { role: 'user', content: [{ type: 'input_text', text: user }] },
         ],
         ...(typeof max_tokens === 'number' && !Number.isNaN(max_tokens)
           ? { [tokenField]: max_tokens }
@@ -1141,6 +1141,43 @@ const RecentMatter = ({ matter, isDark }) => {
   );
 };
 
+const PendingDocumentView = ({ isDark, doc, onAnalyze, onCancel }) => {
+  const t = isDark ? theme.dark : theme.light;
+  const preview = doc?.text?.split(/\n+/).filter(Boolean).slice(0, 5) || [];
+
+  return (
+    <div className={`min-h-screen ${t.bg} transition-colors duration-700 font-sans-ui`}>
+      <div className="px-6 pt-10 pb-6 flex justify-between items-start">
+        <div>
+          <p className={`text-[10px] font-bold uppercase tracking-[0.2em] mb-2 ${t.accent}`}>Файл загружен</p>
+          <h1 className={`font-serif-display text-3xl ${t.textPrimary}`}>{doc?.name || 'Документ'}</h1>
+        </div>
+        <button onClick={onCancel} className={`p-2 rounded-full ${t.textSecondary} hover:bg-white/5`} aria-label="Закрыть">
+          <X size={18} />
+        </button>
+      </div>
+
+      <div className="px-6 space-y-4">
+        <div className={`p-4 rounded-xl border ${t.border} ${t.paper}`}>
+          <p className={`text-sm mb-3 ${t.textSecondary}`}>Предпросмотр (первые строки):</p>
+          <div className={`space-y-3 text-sm ${t.textPrimary}`}>
+            {preview.length ? preview.map((line, idx) => <p key={idx}>{line}</p>) : <p>Текст не найден.</p>}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <Button variant="primary" isDark={isDark} onClick={onAnalyze} className="w-full">
+            Запустить анализ
+          </Button>
+          <Button variant="secondary" isDark={isDark} onClick={onCancel} className="w-full">
+            Отмена
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const MobileExperience = ({ onSwitch, onOpenApi, apiKey, onLog, onOpenLogs, settings, onOpenAdmin }) => {
   const [isDark, setIsDark] = useState(true);
   const [view, setView] = useState('dashboard');
@@ -1184,8 +1221,20 @@ const MobileExperience = ({ onSwitch, onOpenApi, apiKey, onLog, onOpenLogs, sett
           onUploadComplete={(data) => {
             setPipelineError('');
             setPendingDoc(data);
-            setView('analyzing');
+            setView('preview');
           }}
+        />
+      )}
+
+      {view === 'preview' && pendingDoc && (
+        <PendingDocumentView
+          isDark={isDark}
+          doc={pendingDoc}
+          onCancel={() => {
+            setPendingDoc(null);
+            setView('dashboard');
+          }}
+          onAnalyze={() => setView('analyzing')}
         />
       )}
 
@@ -1533,9 +1582,21 @@ const DashboardView = ({ isDark, onStartUpload }) => (
 );
 
 
-const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey, pipelineError = '', onOpenLogs, settings, onOpenAdmin }) => {
+const DocumentAnalysisView = ({
+  isDark,
+  documentData,
+  onEdit,
+  apiKey,
+  pipelineError = '',
+  onOpenLogs,
+  settings,
+  onOpenAdmin,
+  onRunPipeline,
+  pendingDocName,
+}) => {
   const { text, issues, name, pipeline } = documentData;
   const preview = text.split(/\n+/).filter(Boolean).slice(0, 6);
+  const hasPipeline = Boolean(pipeline?.analysis?.length);
 
   const renderPreview = (paragraph) => {
     let parts = [{ text: paragraph, type: 'normal', id: null }];
@@ -1604,6 +1665,17 @@ const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey, pipelineEr
             Настройки LLM
           </button>
           <button
+            onClick={onRunPipeline}
+            disabled={!onRunPipeline}
+            className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider ${
+              isDark
+                ? 'bg-[#C5A059] text-black hover:bg-[#D4AF37] disabled:opacity-50'
+                : 'bg-black text-white hover:bg-gray-800 disabled:opacity-50'
+            }`}
+          >
+            Запустить анализ
+          </button>
+          <button
             className={`px-4 py-2 rounded-lg text-xs font-bold uppercase tracking-wider flex items-center gap-2 ${
               isDark ? 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20' : 'bg-amber-50 text-amber-600'
             }`}
@@ -1631,6 +1703,14 @@ const DocumentAnalysisView = ({ isDark, documentData, onEdit, apiKey, pipelineEr
             isDark ? 'bg-red-500/10 border-b border-red-500/30 text-red-100' : 'bg-red-50 border-b border-red-200 text-red-800'
           }`}>
             {pipelineError}
+          </div>
+        )}
+
+        {!hasPipeline && !pipelineError && (
+          <div className={`absolute top-16 left-0 right-0 z-10 px-6 py-3 text-sm ${
+            isDark ? 'bg-amber-500/10 border-b border-amber-500/30 text-amber-100' : 'bg-amber-50 border-b border-amber-200 text-amber-800'
+          }`}>
+            Загружен файл {pendingDocName || name}. Запустите анализ, чтобы получить риски и правки.
           </div>
         )}
 
@@ -1745,6 +1825,24 @@ const DesktopExperience = ({ onSwitch, apiKey, onOpenApi, onLog, onOpenLogs, set
     setShowUpload(false);
     setActiveTab('analysis');
     setPendingDoc(data);
+    setPipelineError('');
+    setShowPipeline(false);
+    setDocumentData({
+      text: data.text,
+      issues: data.issues || [],
+      name: data.name,
+      pipeline: null,
+    });
+  };
+
+  const handleRunPipeline = (docOverride) => {
+    const doc = docOverride || pendingDoc || {
+      text: documentData.text,
+      issues: documentData.issues,
+      name: documentData.name,
+    };
+    if (!doc?.text) return;
+    setPendingDoc(doc);
     setPipelineError('');
     setShowPipeline(true);
   };
@@ -1892,9 +1990,14 @@ const DesktopExperience = ({ onSwitch, apiKey, onOpenApi, onLog, onOpenLogs, set
             onEdit={() => setShowEditor(true)}
             apiKey={apiKey}
             pipelineError={pipelineError}
-            onOpenLogs={onOpenLogs}
+            onOpenLogs={() => {
+              onLog?.('info', 'Открытие логов', { source: 'desktop-analysis' });
+              onOpenLogs?.();
+            }}
             settings={settings}
             onOpenAdmin={onOpenAdmin}
+            onRunPipeline={() => handleRunPipeline()}
+            pendingDocName={pendingDoc?.name}
           />
         )}
       </main>
