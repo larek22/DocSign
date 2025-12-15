@@ -26,7 +26,7 @@ router.post('/analyze', async (req, res) => {
     return res.json(analysis);
   } catch (error) {
     const status = /ключ|auth/i.test(error.message) ? 401 : 500;
-    return res.status(status).json({ error: error.message });
+    return res.status(status).json({ error: error.message, steps: error.steps });
   }
 });
 

@@ -1,23 +1,15 @@
+import crypto from 'crypto';
 import { callResponses } from './llmClient.js';
-import { normalizeText, chunkText } from './chunking.js';
+import { chunkText } from './chunking.js';
+import { normalizeText } from './normalize.js';
 import { schemaDescription, validateAnalysis } from './schema.js';
 
-const analyzerPrompt = `Ты — старший юрист. На входе текст фрагмента договора (chunk). Задача: найти риски и вернуть ТОЛЬКО JSON по схеме risks[].
-Поля: id, severity (high|medium|low), category (payment|liability|term|termination|jurisdiction|privacy|ip|confidentiality|other),
-title, why, quote (обязателен: цитата из текста), location:{chunk,start,end}, fix:{action, proposed_text}, confidence (0..1).
-Верни JSON { "risks": [...], "missing": [], "redflags": [] } без пояснений.`;
-
-const judgePrompt = `Ты — партнер и судья. Тебе передан массив локальных рисков по чанкам. Объедини дубликаты, снизь шум, оставь только бизнес-значимые.
-Верни единый JSON строго по итоговой схеме: ${schemaDescription}
-Требования: severity только high/medium/low, quote оставляем, confidence 0..1, category из списка.
-Без текста вне JSON.`;
-
-const repairPrompt = `JSON не прошел валидацию. Исправь строго под схему: ${schemaDescription}. Не добавляй пояснений вне JSON.`;
+const trimQuote = (quote = '') => (quote.length > 400 ? `${quote.slice(0, 397)}...` : quote);
 
 const parseJSON = (raw, log) => {
   if (!raw) return null;
-  const fence = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
-  const text = fence?.[1] || raw;
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const text = fenced?.[1] || raw;
   try {
     return JSON.parse(text);
   } catch (error) {
@@ -26,75 +18,159 @@ const parseJSON = (raw, log) => {
   }
 };
 
-const mapChunkRisks = async ({ chunks, apiKey, log, options }) => {
-  const results = [];
+const analyzerPrompt = `Ты — юрист-аналитик. На входе один chunk договора и его id.
+Найди риски, неоднозначности, кабальные условия. Верни ТОЛЬКО JSON формата {"risks":[],"missing":[],"redflags":[]}.
+Правила:
+- severity: high|medium|low
+- category: payment|liability|term|termination|jurisdiction|privacy|ip|other
+- quote: краткая цитата <=400 символов из чанка
+- location.chunk = индекс чанка
+- fix: { action?, proposed_text? }
+- confidence 0..1
+Никакого полного текста договора, только краткие цитаты.`;
+
+const judgePrompt = `Ты — судья. Тебе даны chunks и локальные риски по ним. Объедини дубликаты, убери шум, нормализуй категории и
+верни единый JSON строго по схеме: ${schemaDescription}
+Требования: только JSON, цитаты <=400 символов, location.chunk обязателен, confidence 0..1.`;
+
+const repairPrompt = `JSON не прошел валидацию. Исправь строго под схему: ${schemaDescription}. Верни только JSON, без пояснений.`;
+
+const sanitizeRisks = (risks = []) =>
+  risks.map((risk) => ({
+    ...risk,
+    quote: trimQuote(risk.quote || ''),
+    id: risk.id || `risk_${crypto.randomUUID()}`,
+    location: {
+      chunk: Number.isFinite(Number(risk.location?.chunk)) ? Number(risk.location.chunk) : 0,
+      start: risk.location?.start,
+      end: risk.location?.end,
+    },
+  }));
+
+const analyzeChunks = async ({ chunks, apiKey, options, log }) => {
+  const local = [];
   for (let idx = 0; idx < chunks.length; idx += 1) {
     const chunk = chunks[idx];
-    log?.('info', 'LLM анализ чанка', { id: chunk.id, size: chunk.text.length });
+    log?.('info', 'LLM анализ чанка', { id: chunk.id, length: chunk.text.length });
     const answer = await callResponses({
       system: analyzerPrompt,
-      user: `chunk_id: ${chunk.id}\n\n${chunk.text}`,
+      user: `chunk_id:${idx}\nstart:${chunk.start}\n${chunk.text}`.slice(0, 6000),
       apiKey,
       model: options?.model || 'gpt-5-mini',
-      maxOutputTokens: options?.maxTokens || 1200,
-      topP: options?.topP || 1,
+      maxOutputTokens: options?.maxTokens || 900,
+      topP: 1,
       log,
     });
     const json = parseJSON(answer, log);
     if (json?.risks?.length) {
       json.risks.forEach((r, i) => {
-        results.push({ ...r, location: r.location || { chunk: idx }, id: r.id || `${chunk.id}_r${i + 1}` });
+        const locChunk = Number.isFinite(Number(r.location?.chunk)) ? Number(r.location.chunk) : idx;
+        local.push({
+          ...r,
+          id: r.id || `${chunk.id}_r${i + 1}`,
+          location: {
+            chunk: locChunk,
+            start: r.location?.start,
+            end: r.location?.end,
+          },
+          quote: trimQuote(r.quote || ''),
+        });
       });
     }
   }
-  return results;
+  return local;
+};
+
+const attemptRepair = async ({ payload, apiKey, options, log, attempts = 2 }) => {
+  let current = payload;
+  for (let i = 0; i < attempts; i += 1) {
+    const repaired = await callResponses({
+      system: repairPrompt,
+      user: JSON.stringify(current).slice(0, 12000),
+      apiKey,
+      model: options?.model || 'gpt-5-mini',
+      maxOutputTokens: options?.maxTokens || 1200,
+      topP: 1,
+      log,
+    });
+    const json = parseJSON(repaired, log);
+    const validated = validateAnalysis(json || {});
+    if (validated.success) return validated.data;
+    current = json || current;
+  }
+  return null;
 };
 
 export const analyzeDocument = async ({ text, apiKey, options = {}, log = console.log }) => {
   const started = Date.now();
-  const normalized = normalizeText(text);
-  const chunks = chunkText(normalized, 1600);
+  const steps = [
+    { step: 'extract', status: 'running' },
+    { step: 'chunk', status: 'pending' },
+    { step: 'analyze', status: 'pending' },
+    { step: 'validate', status: 'pending' },
+  ];
 
-  const chunkRisks = await mapChunkRisks({ chunks, apiKey, log, options });
+  const normalized = normalizeText(text || '');
+  if (!normalized) {
+    const err = new Error('Текст документа пуст после нормализации.');
+    err.steps = steps;
+    throw err;
+  }
+
+  steps[0].status = 'done';
+  steps[1].status = 'running';
+  const chunks = chunkText(normalized, 1400);
+  steps[1].status = 'done';
+
+  steps[2].status = 'running';
+  const chunkRisks = await analyzeChunks({ chunks, apiKey, options, log });
 
   const judgeAnswer = await callResponses({
     system: judgePrompt,
-    user: JSON.stringify({ chunks, risks: chunkRisks }).slice(0, 12000),
+    user: JSON.stringify({
+      chunks: chunks.map((c, idx) => ({ id: idx, start: c.start, end: c.end, text: c.text.slice(0, 1600) })),
+      risks: sanitizeRisks(chunkRisks),
+    }).slice(0, 12000),
     apiKey,
     model: options?.model || 'gpt-5-mini',
-    maxOutputTokens: options?.maxTokens || 1500,
-    topP: options?.topP || 1,
+    maxOutputTokens: options?.maxTokens || 2000,
+    topP: 1,
     log,
   });
 
-  let combined = parseJSON(judgeAnswer, log);
-  const validated = validateAnalysis(combined || {});
+  const combined = parseJSON(judgeAnswer, log);
+  let validated = validateAnalysis(combined || {});
+  steps[2].status = 'done';
+
   if (!validated.success) {
-    log?.('info', 'Запуск repair-прохода для JSON');
-    const repairAnswer = await callResponses({
-      system: repairPrompt,
-      user: judgeAnswer,
-      apiKey,
-      model: options?.model || 'gpt-5-mini',
-      maxOutputTokens: options?.maxTokens || 1500,
-      topP: options?.topP || 1,
-      log,
-    });
-    combined = parseJSON(repairAnswer, log);
+    steps[3].status = 'running';
+    const repaired = await attemptRepair({ payload: combined || {}, apiKey, options, log });
+    if (repaired) {
+      validated = { success: true, data: repaired };
+    }
   }
 
-  const validatedFinal = validateAnalysis(combined || {});
-  if (!validatedFinal.success) {
-    throw new Error('Итоговый JSON не прошел валидацию после repair.');
+  if (!validated.success) {
+    steps[3].status = 'error';
+    const err = new Error('Итоговый JSON не прошел валидацию даже после repair.');
+    err.steps = steps;
+    throw err;
   }
+
+  const data = validated.data;
+  const finalRisks = sanitizeRisks(data.risks).map((r) => ({ ...r, quote: trimQuote(r.quote || '') }));
+
+  steps[3].status = 'done';
 
   return {
-    ...validatedFinal.data,
+    ...data,
+    risks: finalRisks,
     meta: {
-      ...(validatedFinal.data.meta || {}),
+      ...(data.meta || {}),
       model: options?.model || 'gpt-5-mini',
       chunks: chunks.length,
       elapsed_ms: Date.now() - started,
+      steps,
     },
   };
 };

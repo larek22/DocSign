@@ -118,7 +118,7 @@ const DEFAULT_LLM_SETTINGS = {
   temperature: 1,
 };
 
-const runPipeline = async ({ text, issues, apiKey, log, settings }) => {
+const runPipeline = async ({ text, issues, apiKey, log, settings, onStage }) => {
   if (!text || !text.trim()) {
     throw new Error('Загруженный документ пуст или не удалось извлечь текст.');
   }
@@ -137,7 +137,10 @@ const runPipeline = async ({ text, issues, apiKey, log, settings }) => {
     },
   };
 
+  onStage?.(1); // Extract
+
   log?.('info', 'Отправка документа на серверный анализ', { length: payload.text.length });
+  onStage?.(2); // Chunk ready
 
   const response = await fetch('/api/analyze', {
     method: 'POST',
@@ -148,13 +151,17 @@ const runPipeline = async ({ text, issues, apiKey, log, settings }) => {
     body: JSON.stringify(payload),
   });
 
+  onStage?.(3); // Analyze
+
   if (!response.ok) {
     const error = await response.json().catch(() => ({}));
     throw new Error(error?.error || 'Серверный анализ не завершён.');
   }
 
   const data = await response.json();
+  onStage?.(4); // Validate/repair
   log?.('info', 'Pipeline завершён на сервере', { risks: data?.risks?.length || 0, chunks: data?.meta?.chunks });
+  onStage?.(5); // Done
 
   const mappedIssues = Array.isArray(data?.risks)
     ? data.risks.map((risk, idx) => ({
@@ -480,22 +487,16 @@ const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi
       runningRef.current = true;
       try {
         setError('');
-        setStep(1);
         onLog?.('info', 'Старт пайплайна', { name: doc?.name, size: doc?.text?.length });
-        await new Promise((resolve) => setTimeout(resolve, 800));
-        setStep(2);
-        await new Promise((resolve) => setTimeout(resolve, 1200));
-        setStep(3);
         const result = await runPipeline({
           text: doc?.text,
           issues: doc?.issues,
           apiKey,
           log: onLog,
           settings,
+          onStage: setStep,
         });
         if (cancelled) return;
-        setStep(4);
-        await new Promise((resolve) => setTimeout(resolve, 400));
         onCompleteRef.current?.(result);
       } catch (err) {
         if (cancelled) return;
@@ -519,15 +520,17 @@ const MultiStageLoader = ({ isDark, onComplete, onCancel, apiKey, doc, onOpenApi
   }, [apiKey, doc, attempt, onLog, settings]);
 
   const steps = [
-    '1. Парсинг и структурирование (статьи, пункты)',
-    '2. Red Team: поиск всех рисков',
-    '3. Судья: валидация и идеальные формулировки',
-    '4. Сборка итогового JSON',
+    '1. Извлечение текста',
+    '2. Чанкинг по пунктам',
+    '3. Анализ рисков (GPT-5-mini)',
+    '4. Валидация / Repair',
+    '5. Итоговый JSON',
   ];
 
   const renderStatus = (idx) => {
-    if (step > idx) return 'completed';
-    if (step === idx) return 'active';
+    const stage = idx + 1;
+    if (step > stage) return 'completed';
+    if (step === stage) return 'active';
     return 'pending';
   };
 

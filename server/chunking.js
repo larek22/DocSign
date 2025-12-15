@@ -1,34 +1,37 @@
-export const normalizeText = (input = '') =>
-  input
-    .replace(/\r\n/g, '\n')
-    .replace(/\t/g, ' ')
-    .replace(/\s+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+import { normalizeText } from './normalize.js';
 
-export const chunkText = (text, targetSize = 1200) => {
-  const normalized = normalizeText(text);
-  const paragraphs = normalized.split(/\n{2,}/g);
+const headingRegex = /(^|\n)(\d+(?:\.\d+)*\.?|[A-ZА-Я][^\n]{0,60})\n/;
+
+export const chunkText = (rawText, targetSize = 1600) => {
+  const text = normalizeText(rawText || '');
+  const paragraphs = text.split(/\n{2,}/g);
   const chunks = [];
   let buffer = '';
-  let chunkIndex = 0;
+  let start = 0;
+  let chunkId = 0;
+
+  const flush = () => {
+    if (!buffer.trim()) return;
+    const end = start + buffer.length;
+    chunks.push({ id: `chunk_${chunkId++}`, text: buffer.trim(), start, end });
+    start = end + 2; // account for split delimiter
+    buffer = '';
+  };
+
   paragraphs.forEach((p) => {
     const candidate = buffer ? `${buffer}\n\n${p}` : p;
-    if (candidate.length >= targetSize && buffer) {
-      chunks.push({ id: `chunk_${chunkIndex++}`, text: buffer });
+    const isHeadingSplit = headingRegex.test(`\n${p}\n`);
+    if (candidate.length > targetSize || isHeadingSplit) {
+      flush();
       buffer = p;
-    } else if (candidate.length >= targetSize) {
-      chunks.push({ id: `chunk_${chunkIndex++}`, text: candidate });
-      buffer = '';
     } else {
       buffer = candidate;
     }
   });
-  if (buffer) {
-    chunks.push({ id: `chunk_${chunkIndex++}`, text: buffer });
-  }
+
+  flush();
   if (!chunks.length) {
-    chunks.push({ id: 'chunk_0', text: normalized });
+    chunks.push({ id: 'chunk_0', text, start: 0, end: text.length });
   }
   return chunks;
 };

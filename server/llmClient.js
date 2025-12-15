@@ -29,6 +29,7 @@ export const callResponses = async ({ system, user, apiKey, model = 'gpt-5-mini'
       { role: 'system', content: [{ type: 'input_text', text: system }] },
       { role: 'user', content: [{ type: 'input_text', text: user }] },
     ],
+    response_format: { type: 'json_object' },
     ...(maxOutputTokens ? { max_output_tokens: maxOutputTokens } : {}),
     ...(topP ? { top_p: topP } : {}),
   };
@@ -41,22 +42,29 @@ export const callResponses = async ({ system, user, apiKey, model = 'gpt-5-mini'
       body: JSON.stringify(payload),
     });
 
+    const bodyText = await response.text();
+    let parsed;
+    try {
+      parsed = JSON.parse(bodyText);
+    } catch (e) {
+      parsed = null;
+    }
+
     if (response.ok) {
-      const data = await response.json();
-      const content = extractText(data);
-      log?.('info', 'LLM ответ получен', { content: content.slice(0, 400) || 'пусто' });
+      const content = extractText(parsed);
+      log?.('info', 'LLM ответ получен', { raw: content?.slice(0, 400) || 'пусто' });
       return content;
     }
 
-    const body = await response.text();
-    log?.('error', 'Ответ LLM вернул ошибку', { status: response.status, body: body.slice(0, 400) });
+    log?.('error', 'Ответ LLM вернул ошибку', { status: response.status, body: bodyText.slice(0, 400) });
 
     if (response.status === 429 || response.status >= 500) {
       attempt += 1;
-      if (attempt > MAX_RETRIES) throw new Error(`LLM ошибка ${response.status}: ${body}`);
-      await sleep(300 * attempt);
+      if (attempt > MAX_RETRIES) throw new Error(`LLM ошибка ${response.status}: ${bodyText}`);
+      await sleep(400 * attempt);
       continue;
     }
-    throw new Error(`LLM ошибка ${response.status}: ${body}`);
+
+    throw new Error(`LLM ошибка ${response.status}: ${bodyText}`);
   }
 };
