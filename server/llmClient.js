@@ -6,38 +6,47 @@ const extractText = (data, log) => {
   if (!data) return { text: '', types: [] };
 
   const types = [];
-  if (data.output_text) {
+  const parts = [];
+
+  if (typeof data.output_text === 'string' && data.output_text.trim()) {
     types.push('output_text');
-    return { text: data.output_text, types };
+    parts.push(data.output_text);
   }
 
   if (Array.isArray(data.output)) {
-    const parts = data.output.flatMap((item) => {
-      if (!item?.content) return [];
-      return item.content.map((c) => {
-        if (!c) return '';
+    data.output.forEach((item) => {
+      if (!item?.content) return;
+      item.content.forEach((c) => {
+        if (!c) return;
         if (c.json) {
           types.push(`content:${c.type || 'json'}`);
           try {
-            return JSON.stringify(c.json);
+            parts.push(JSON.stringify(c.json));
           } catch (e) {
-            return '';
+            parts.push('');
           }
+          return;
         }
-        types.push(`content:${c.type || 'text'}`);
-        return c.text || '';
+        if (typeof c.text === 'string') {
+          types.push(`content:${c.type || 'text'}`);
+          parts.push(c.text);
+        }
       });
     });
-    return { text: parts.join(''), types };
   }
 
-  if (Array.isArray(data.choices)) {
+  if (!parts.length && Array.isArray(data.choices)) {
     types.push('choices');
-    return { text: data.choices[0]?.message?.content || '', types };
+    const content = data.choices[0]?.message?.content;
+    if (content) parts.push(content);
   }
 
-  log?.('info', 'LLM ответ без извлекаемого контента', { keys: Object.keys(data || {}) });
-  return { text: '', types };
+  if (!parts.length) {
+    log?.('info', 'LLM ответ без извлекаемого контента', { keys: Object.keys(data || {}) });
+    return { text: '', types };
+  }
+
+  return { text: parts.join(''), types };
 };
 
 export const callResponses = async ({ system, user, apiKey, model = 'gpt-5-mini', maxOutputTokens = 1200, topP = 1, log }) => {
@@ -79,6 +88,9 @@ export const callResponses = async ({ system, user, apiKey, model = 'gpt-5-mini'
         raw: text?.slice(0, 400) || 'пусто',
         contentTypes: types,
       });
+      if (!text?.trim()) {
+        throw new Error('LLM ответ пуст: не удалось извлечь текст или JSON.');
+      }
       return text;
     }
 
